@@ -63,7 +63,7 @@ Look up AppendToTimeline in the Resolve scripting docs.
 Use run_lua to return the current timeline's start timecode and its item count on V1.
 ```
 
-https://github.com/user-attachments/assets/7a5a814c-8203-4188-b667-5401219f15b4
+https://github.com/user-attachments/assets/febdf2b9-8e0d-4fbf-8462-0d6ecd98c829
 
 ## Tools
 
@@ -116,8 +116,6 @@ return { timeline = timeline:GetName(), start_timecode = timeline:GetStartTimeco
 
 > [!WARNING]
 > The bridge handles one request at a time and cannot answer Resolve's modal dialogs. Long synchronous API calls (`RenderWithQuickExport`, `TranscribeAudio`, `Export`, `ArchiveProject`, `LoadProject` on an unsaved project when live save is off) block it until they finish. Start renders with `render_current_timeline` and poll `get_render_status` instead of waiting inside `run_lua`.
-
-https://github.com/user-attachments/assets/febdf2b9-8e0d-4fbf-8462-0d6ecd98c829
 
 ## Settings
 
