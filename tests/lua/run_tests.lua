@@ -426,6 +426,8 @@ local dbg_saved = rawget(_G, "debug")
 rawset(_G, "debug", nil)
 rr = M.run_chunk(st0, 'error("plain")')
 eq("no debug: message only", rr.error, "request:1: plain")
+rr = M.run_chunk(st0, "error({ code = 7 })")
+check("no debug: table error kept", not rr.ok and type(rr.error) == "table" and rr.error.code == 7, rr.error)
 rawset(_G, "debug", dbg_saved)
 rr = M.run_chunk(st0, "for i = 1, 500 do print(i) end")
 eq("print cap lines", #rr.prints, M.PRINT_MAX_LINES)
@@ -459,7 +461,15 @@ local quoty = string.rep('"\\', 40000)
 f = fields()
 s = M.fit_response(f, quoty, 64)
 check("quote-heavy fits", #s <= 65536, #s)
-check("quote-heavy decodes", dkjson.decode(s) ~= nil)
+check("quote-heavy fills the budget", #s >= 60000, #s)
+d = dkjson.decode(s)
+check("quote-heavy decodes", d ~= nil)
+check("quote-heavy preview is long", d and type(d.result) == "string" and #d.result >= 30000, d and #d.result)
+local halfq = string.rep('a"', 40000)
+f = fields()
+s = M.fit_response(f, halfq, 64)
+check("half-quoted fills the budget", #s <= 65536 and #s >= 60000, #s)
+check("half-quoted decodes", dkjson.decode(s) ~= nil)
 local utf = string.rep("日本語", 30000)
 f = fields()
 s = M.fit_response(f, utf, 64)
@@ -522,6 +532,10 @@ dir, src = M.resolve_state_dir("@@RLB_STATE_DIR@@", genv({}), mp)
 eq("profile", dir, "/Users/x/.resolve-lua-bridge"); eq("profile source", src, "profile")
 dir, src = M.resolve_state_dir("@@RLB_STATE_DIR@@", genv({}), nil)
 check("none", dir == nil and src:match("no state directory") ~= nil, src)
+eq("stamp placeholder", M.STATE_DIR_STAMP, "@@RLB_STATE_DIR@@")
+local bridge_src = read_file(BRIDGE) or ""
+check("stamp is a long-bracket literal", bridge_src:find("[==[@@RLB_STATE_DIR@@]==]", 1, true) ~= nil)
+check("stamp is not a quoted literal", bridge_src:find('"@@RLB_STATE_DIR@@"', 1, true) == nil)
 
 ---------------------------------------------------------------------------
 -- 15. acquisition
@@ -620,6 +634,26 @@ FU.profile = saved_profile
 local st6 = M.start({ resolve = resolve_stub, fusion = fusion_stub, getenv = genv({ HOME = DIR .. "/home" }) })
 check("HOME state dir", st6 and st6.state_dir == DIR .. "/home/.resolve-lua-bridge" and st6.state_dir_source == "HOME", st6 and st6.state_dir)
 eq("missing state dir is not an error", M.run_loop(st6, 3, 0), "ticks")
+remove_file(RQ)
+FU.fail_saves, FU.saves = 5, 0
+local st7 = M.start({ resolve = resolve_stub, fusion = fusion_stub, state_dir = STATE })
+check("failed start save recorded", st7 and st7.session_saved == false and st7.start_save.ok == false, st7 and st7.start_save.error)
+eq("failed start save: five attempts", FU.saves, 5)
+B.clock = 400
+FU.fail_saves, FU.saves = 5, 0
+M.run_loop(st7, 10, 0)
+eq("start save retried once per second", FU.saves, 5)
+B.clock = 401.5
+FU.fail_saves, FU.saves = 0, 0
+M.run_loop(st7, 3, 0)
+check("start save lands on retry", st7.session_saved == true and FU.saves == 1, FU.saves)
+check("retried session on disk", (read_file(PREFS_FILE) or ""):find(M.hex('"session":"' .. st7.session .. '"'), 1, true) ~= nil)
+write_request({ id = "ps", op = "ping", session = "*" })
+M.run_loop(st7, 3, 0)
+local prid, presp = decode_resp(rlb("RLBResp"))
+check("ping reports the start save", prid == "ps" and presp.result and presp.result.session_saved == true
+  and type(presp.result.start_save) == "table" and presp.result.start_save.ok == false and presp.result.start_save.retries == 2,
+  presp.result and presp.result.start_save and presp.result.start_save.retries)
 
 ---------------------------------------------------------------------------
 -- 17. run_loop
@@ -667,10 +701,16 @@ write_request({ id = "v2", op = "ping", session = "*", v = 2 })
 M.run_loop(st, 5, 0)
 rid, resp = decode_resp(rlb("RLBResp"))
 check("v=2 error", rid == "v2" and resp.ok == false and resp.error:match("protocol version") ~= nil, resp.error)
-write_request({ id = "nocode", op = "run", session = "*" })
+write_request({ id = "nocode", op = "run", session = st.session })
 M.run_loop(st, 5, 0)
 rid, resp = decode_resp(rlb("RLBResp"))
 check("run without code error", rid == "nocode" and resp.ok == false and resp.error == "run without code", resp.error)
+write_request({ id = "wild", op = "run", session = "*", code = "return 1" })
+FU.saves = 0
+M.run_loop(st, 5, 0)
+rid, resp = decode_resp(rlb("RLBResp"))
+check("wildcard run rejected", rid == "wild" and resp.ok == false and tostring(resp.error):match("^run needs") ~= nil, resp.error)
+eq("wildcard run: error saved", FU.saves, 1)
 write_file(RQ, "return { id = 'bad id', v = 1, session = '*', op = 'ping', ts = " .. os.time() .. " }")
 FU.saves = 0
 B.clock = 100
@@ -695,13 +735,26 @@ rid = decode_resp(rlb("RLBResp"))
 eq("valid replacement handled", rid, "after-bad")
 remove_file(RQ)
 eq("deleted file: ticks", M.run_loop(st, 3, 0), "ticks")
+st = fresh_start()
+write_request({ id = "van1", op = "ping", session = "*" })
+local lf_real = rawget(_G, "loadfile")
+rawset(_G, "loadfile", function(path, ...) remove_file(path); return lf_real(path, ...) end)
+B.clock = 300
+eq("vanish race: loop continues", M.run_loop(st, 3, 0), "ticks")
+eq("vanish race: no backoff", st.bad_until, 0)
+eq("vanish race: no save", FU.saves, 0)
+rawset(_G, "loadfile", lf_real)
+write_request({ id = "van2", op = "ping", session = "*" })
+M.run_loop(st, 3, 0)
+rid = decode_resp(rlb("RLBResp"))
+eq("vanish race: next request answered at once", rid, "van2")
 FU.saves = 0
-write_request({ id = "e1", op = "run", session = "*", code = 'error("bad")' })
+write_request({ id = "e1", op = "run", session = st.session, code = 'error("bad")' })
 eq("erroring chunk: loop continues", M.run_loop(st, 5, 0), "ticks")
 rid, resp = decode_resp(rlb("RLBResp"))
 check("erroring chunk: error envelope", rid == "e1" and resp.ok == false and resp.error:find("bad", 1, true) ~= nil, resp.error)
 eq("erroring chunk: saved", FU.saves, 1)
-write_request({ id = "mk", op = "run", session = "*", max_kb = 2, code = 'return string.rep("z", 10000)' })
+write_request({ id = "mk", op = "run", session = st.session, max_kb = 2, code = 'return string.rep("z", 10000)' })
 M.run_loop(st, 5, 0)
 rid, resp = decode_resp(rlb("RLBResp"))
 check("max_kb honoured", rid == "mk" and resp.truncated == true and resp.result_bytes == 10002, resp.result_bytes)
@@ -709,14 +762,14 @@ check("max_kb size", #unhex(tostring(rlb("RLBResp")):match("^[^:]*:(.*)$")) <= 2
 RS.version_throws = true
 FU.saves = 0
 for i = 1, 3 do
-  write_request({ id = "u" .. i, op = "run", session = "*", code = 'error("x")' })
+  write_request({ id = "u" .. i, op = "run", session = st.session, code = 'error("x")' })
   local action = M.run_loop(st, 5, 0)
   if i < 3 then eq("strike " .. i, action, "ticks") else eq("strike 3: unreachable", action, "unreachable") end
 end
 eq("unreachable: only the three responses saved", FU.saves, 3)
 RS.version_throws = false
 st = fresh_start()
-write_request({ id = "ok1", op = "run", session = "*", code = "return 1" })
+write_request({ id = "ok1", op = "run", session = st.session, code = "return 1" })
 M.run_loop(st, 5, 0)
 eq("strikes reset on success", st.strikes, 0)
 write_request({ id = "st1", op = "stop", session = st.session })
@@ -741,7 +794,7 @@ eq("guarded stop: one save", FU.saves, 1)
 ---------------------------------------------------------------------------
 group("on-disk prefs")
 st = fresh_start()
-write_request({ id = "disk1", op = "run", session = "*", code = 'return { s = "q\\"\\\\\\n\\té", n = { 1, 2 } }' })
+write_request({ id = "disk1", op = "run", session = st.session, code = 'return { s = "q\\"\\\\\\n\\té", n = { 1, 2 } }' })
 M.run_loop(st, 5, 0)
 local content = read_file(PREFS_FILE) or ""
 local on_disk = content:match('%f[%w]RLBResp = "([^"]*)"')

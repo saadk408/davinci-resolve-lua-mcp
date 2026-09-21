@@ -223,10 +223,11 @@ deprecated.push({ cls: "TimelineItem", name: "SetProperty", doc: "Use SetPropert
 
 const out = [];
 const emit = (s = "") => out.push(s);
-const methodCount = classes.reduce((n, c) => n + c.methods.length, 0);
+const apiClasses = classes.filter((c) => !HAND_WRITTEN.has(c.name));
+const methodCount = apiClasses.reduce((n, c) => n + c.methods.length, 0);
 emit(BEGIN);
 emit(`-- Source: DaVinciResolveScript.pyi next to the README dated ${readmeDate}: ${literals.length} string enums,`);
-emit(`-- ${floatAliases.length} constant groups, ${typedDicts.length} TypedDicts, ${classes.filter((c) => !HAND_WRITTEN.has(c.name)).length} API classes with ${methodCount} methods,`);
+emit(`-- ${floatAliases.length} constant groups, ${typedDicts.length} TypedDicts, ${apiClasses.length} API classes with ${methodCount} methods,`);
 emit(`-- plus ${deprecated.length} deprecated or unsupported names from the README (marked @deprecated so a call warns).`);
 emit();
 emit("-- String enums (Literal[...] in the .pyi).");
@@ -249,17 +250,16 @@ for (const td of typedDicts) {
   emit();
 }
 emit("-- API classes. Methods are colon-called (obj:Method()); constants are dot-read (resolve.EXPORT_AAF).");
-for (const c of classes) {
-  if (HAND_WRITTEN.has(c.name)) continue;
+for (const c of apiClasses) {
   const local = c.name === "Resolve" ? "ResolveClass" : c.name; // Resolve() is also a global function
+  const known = new Set(c.methods.map((mth) => mth.name));
+  const seen = new Set();
+  const deps = deprecated.filter((d) => d.cls === c.name && !known.has(d.name) && !seen.has(d.name) && seen.add(d.name));
   for (const d of docLine(c.doc)) emit(d);
   emit(`---@class ${c.name}`);
-  if (c.methods.length === 0) {
-    emit("---@field [string] fun(...): any  -- opaque in the .pyi (no methods declared)");
-    emit();
-    continue;
-  }
   for (const k of c.constants) emit(`---@field ${k.name} ${k.type}`);
+  if (c.methods.length === 0) emit("---@field [string] fun(...): any  -- opaque in the .pyi (no methods declared)");
+  if (c.methods.length === 0 && deps.length === 0) { emit(); continue; }
   emit(`local ${local} = {}`);
   emit();
   for (const mth of c.methods) {
@@ -269,11 +269,7 @@ for (const c of classes) {
     emit(`function ${local}:${mth.name}(${mth.params.map((p) => p.name).join(", ")}) end`);
     emit();
   }
-  const known = new Set(c.methods.map((mth) => mth.name));
-  const seen = new Set();
-  for (const d of deprecated) {
-    if (d.cls !== c.name || known.has(d.name) || seen.has(d.name)) continue;
-    seen.add(d.name);
+  for (const d of deps) {
     emit(`---@deprecated ${d.doc.replace(/\s+/g, " ").trim()} (README "${d.section}")`);
     emit("---@param ... any");
     emit("---@return any");
@@ -305,4 +301,4 @@ if (checkOnly) {
   fail("types/resolve_host.d.lua is stale; run `make gen-types`");
 }
 writeFileSync(typesPath, before + block + after);
-process.stdout.write(`gen-types: wrote ${block.split("\n").length} generated lines (${classes.length} classes, ${methodCount} methods, ${typedDicts.length} TypedDicts, ${deprecated.length} deprecated names)\n`);
+process.stdout.write(`gen-types: wrote ${block.split("\n").length} generated lines (${apiClasses.length} API classes, ${methodCount} methods, ${typedDicts.length} TypedDicts, ${deprecated.length} deprecated names)\n`);

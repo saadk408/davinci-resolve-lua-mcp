@@ -1,21 +1,18 @@
 -- resolve_lua_bridge v0.1.0
 -- RLB_STATE_DIR=@@RLB_STATE_DIR@@
---
 -- The in-Resolve half of resolve-lua-bridge (docs/plan.md, protocol v1). Launched from
--- Workspace > Scripts, it polls <state_dir>/next.lua, runs the Lua chunk a request carries, and
--- answers through Fusion prefs: Global.ResolveLuaBridge.RLBResp = "<id>:<hex of UTF-8 JSON>"
--- (one SavePrefs per request) and RLBSession = "<hex of JSON>" (once at start, once on stop).
--- Host facts are measured, not documented (docs/diagnostic-2026-09.md): io, os.execute/remove/
--- rename, require and debug are nil; print is muted; setfenv, loadfile, loadstring and xpcall
--- exist; bmd.wait sleeps; bmd.gettime is float seconds. This file never exits the process, never
--- deletes a file, never touches prefs while idle, and has no dependencies. Loaded with the chunk
--- argument "RLB_BRIDGE_TESTING" (tests/lua, under fuscript) it returns its internals instead.
+-- Workspace > Scripts, it polls <state_dir>/next.lua, runs the chunk a request carries, and answers
+-- through Fusion prefs (Global.ResolveLuaBridge.RLBResp = "<id>:<hex json>", one SavePrefs per
+-- request; RLBSession once at start and on stop). The host facts it relies on are measured, not
+-- documented (docs/diagnostic-2026-09.md). It never exits the process, never deletes a file, never
+-- touches prefs while idle, and has no dependencies. Loaded with the chunk argument
+-- "RLB_BRIDGE_TESTING" (tests/lua, under fuscript) it returns its internals instead of looping.
 
 local MODE = ...
 
 local VERSION = "0.1.0"
 local BRIDGE = "resolve_lua_bridge v" .. VERSION
-local STATE_DIR_STAMP = "@@RLB_STATE_DIR@@"   -- substituted by the server at copy time
+local STATE_DIR_STAMP = [==[@@RLB_STATE_DIR@@]==] -- server-stamped at copy time; long bracket: quotes are safe
 local PREFIX = "Global.ResolveLuaBridge."
 local TICK = 0.05                              -- seconds between bmd.fileexists polls
 local STALE_S = 120                            -- requests older than this get an error response
@@ -40,7 +37,6 @@ end
 local function gread(name)
   local ok, v = pcall(function() return _G[name] end)
   if ok then return v end
-  return nil
 end
 
 local function bmd_call(name, ...)
@@ -62,10 +58,7 @@ local function file_exists(path) return bmd_call("fileexists", path) == true end
 local function ms_since(t0) return math.floor((now() - t0) * 1000 + 0.5) end
 local function pack(...) return { n = select("#", ...), ... } end
 
-local function clamp(n, lo, hi)
-  if n ~= n or n < lo then return lo elseif n > hi then return hi end
-  return n
-end
+local function clamp(n, lo, hi) if n ~= n or n < lo then return lo elseif n > hi then return hi end return n end
 
 -- obj:method() under pcall; the value only if it is a string (API probes and health checks).
 local function call_string(obj, method)
@@ -214,9 +207,13 @@ local function fit_response(f, result, max_kb)
   for _ = 1, 8 do
     if cut <= 0 then break end
     cut = utf8_cut(rj, cut)
-    s = envelope_json(f, json_string(rj:sub(1, cut)))
+    local preview = json_string(rj:sub(1, cut))
+    s = envelope_json(f, preview)
     if #s <= max then return s end
-    cut = cut - (#s - max)
+    -- Shrink in proportion to the escaped size, so quote-heavy results still fill the budget.
+    local budget = max - (#s - #preview) - 16
+    local next_cut = math.floor(cut * budget / #preview)
+    cut = (next_cut < cut) and next_cut or (cut - 1)
   end
   f.prints_dropped = (f.prints_dropped or 0) + #(f.prints or {})
   f.prints = {}
@@ -362,7 +359,7 @@ local function run_chunk(st, code)
     return r
   end
   if type(setfenv) == "function" then setfenv(fn, make_env(st, cap.print)) end
-  local handler = tos
+  local handler = function(e) if type(e) == "table" then return e end return tos(e) end   -- keep table errors
   local dbg = gread("debug")
   if type(dbg) == "table" and type(dbg.traceback) == "function" then handler = dbg.traceback end
   -- Functions the chunk builds with loadstring inherit _G, so swap _G.print as well (measured).
@@ -435,7 +432,8 @@ local function handle_request(st, req)
   if req.op == "ping" then
     f.ok = true
     return f, { ok = true, product = st.product, version = st.version, pid = st.pid, session = st.session,
-                state_dir = st.state_dir, uptime_s = wall() - st.started, bridge = BRIDGE }
+                state_dir = st.state_dir, uptime_s = wall() - st.started, bridge = BRIDGE,
+                session_saved = st.session_saved, start_save = st.start_save, last_error = st.last_error }
   elseif req.op == "stop" then
     f.ok = true
     return f, { ok = true, session = st.session }
@@ -452,6 +450,9 @@ local function dispatch(st, req)
     return "takeover"   -- a newer loop owns the slot; leave without touching prefs
   end
   local ok, err = validate_request(req)
+  if ok and req.op == "run" and req.session ~= st.session then
+    ok, err = false, 'run needs this bridge\'s session id; "*" is only for ping and stop'
+  end
   local f = { id = req.id, session = st.session, op = type(req.op) == "string" and req.op or "" }
   local text
   if not ok then
@@ -532,6 +533,7 @@ local function start(opts)
   set_pref(st, "RLBResp", "")
   local ok, attempts, ms, err = save_prefs(st)
   st.start_save = { ok = ok, attempts = attempts, ms = ms, error = err }
+  st.session_saved = ok   -- when false, run_loop retries the save once a second until it lands
   return st
 end
 
@@ -543,11 +545,19 @@ local function run_loop(st, max_ticks, tick)
     if max_ticks and ticks >= max_ticks then return "ticks" end
     ticks = ticks + 1
     wait(tick)
+    if not st.session_saved and now() >= (st.session_retry_at or 0) then
+      -- The start save failed every attempt (Resolve was writing prefs): finish it, once a second.
+      st.session_saved = save_prefs(st)
+      st.start_save.retries = (st.start_save.retries or 0) + 1
+      if not st.session_saved then st.session_retry_at = now() + 1 end
+    end
     if file_exists(st.req_path) and now() >= st.bad_until then
       local req, lerr = load_request(st.req_path)
       if req == nil or not valid_id(req.id) then
-        st.bad_until = now() + BAD_FILE_BACKOFF_S
-        st.last_error = lerr or "invalid request id"
+        if file_exists(st.req_path) then   -- still there: unreadable, not just deleted by the server
+          st.bad_until = now() + BAD_FILE_BACKOFF_S
+          st.last_error = lerr or "invalid request id"
+        end
       elseif req.id ~= st.last_id then
         st.last_id = req.id
         local action = dispatch(st, req)

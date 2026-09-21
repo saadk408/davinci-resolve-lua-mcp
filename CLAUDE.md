@@ -14,12 +14,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   "Consequences for the plan" section lists what was folded into `docs/plan.md` and this file.
   `scripts/claude_diag.lua` stays as the Step 1 record; its helpers were ported into the bridge.
 - **Step 2 is done (2026-09-20).** `bridge/resolve_lua_bridge.lua` (581 lines, protocol v1) is the
-  in-Resolve loop; `tests/lua/run_tests.lua` (242 checks under `fuscript` against stub
+  in-Resolve loop; `tests/lua/run_tests.lua` (262 checks under `fuscript` against stub
   `bmd`/`resolve`/`fusion` objects) and `tests/lua/check_bridge.sh` (grep gates) test it;
   `scripts/gen-types.mjs` generates the API classes in `types/resolve_host.d.lua` from the `.pyi`;
   the `Makefile` has `test-lua`, `check-bridge`, `lint-lua`, `gen-types`. The deviations from the
-  protocol text as first written are in `docs/plan-review-2026-09.md` § M and folded into
-  `docs/plan.md`. Next is Step 3 (the TypeScript server), then Steps 4-7 in order.
+  protocol text as first written, and the fixes from the review that followed the commit, are in
+  `docs/plan-review-2026-09.md` § M and folded into `docs/plan.md`. Next is Step 3 (the
+  TypeScript server), then Steps 4-7 in order.
 - Git repository on `main`; `.gitignore` covers `.DS_Store`, `.remember/`, `.venv/`, `node_modules/`, `dist/`, `server/`.
 
 ## Hard gates, in order
@@ -55,6 +56,7 @@ bridge/resolve_lua_bridge.lua (Scripts-menu Lua state, holds live `resolve`)
       loop: bmd.wait(0.05); bmd.fileexists -> loadfile -> new id & our session? ->
             loadstring+setfenv+xpcall with captured print -> SetPrefs(RLBResp)+SavePrefs
       RLBSession written once at start; no fusion: calls while idle; stop = op="stop"; takeover = session mismatch
+      run needs the exact session id ("*" is for ping and stop only); a failed start save is retried once a second
 ```
 
 Layout: `manifest.json` (MCPB v0.4), `package.json`, `tsconfig.json`, `.mcpbignore`, `src/` (`index.ts`, `server.ts` with the 15 tools, `config.ts`, `protocol.ts`, `prefs.ts`, `lua.ts`, `docsSearch.ts`, `bridgeInstall.ts`, `log.ts`), `server/index.js` (esbuild output, git-ignored, shipped), `bridge/resolve_lua_bridge.lua` (one dependency-free file, under 600 lines), `scripts/` (`claude_diag.lua`, `gen-types.mjs`, `dev-register.mjs`, `smoke.mjs`), `tests/` (`node --test` via `tsx`; `tests/lua/` under `fuscript`), `dist/` (packed bundle, git-ignored), `Makefile`, `README.md`. Developer-only, must be listed in `.mcpbignore`: `.luarc.json`, `types/`, `scripts/gen-types.mjs`, `tests/`, `Makefile`, `.out/` (Lua LSP configuration, generated host-global definitions and the test tooling, see "Working in this repo").
@@ -111,7 +113,7 @@ Mirror of `docs/plan.md` "Safety and behaviour rules" (the original spec's rules
 - An empty Lua table encodes as `[]` when it carried Resolve's `__flags` key (an empty API list) and as `{}` otherwise (the encoder cannot tell an empty plain table from an empty dict), so the server treats `{}` as `[]` wherever a list is expected, and tests assert with `Array.isArray(x) ? x : []`. Only the chunk's first return value is sent (`extra_returns` counts the rest); prints are capped at 200 lines / 16 KB (`prints_dropped`).
 - `bmd.readstring`/`bmd.writestring` are Lua-table serialisers, not file I/O.
 - The Console and the Scripts-menu host are different states; the menu host is what the bridge runs in, and Step 1 measured it on this Mac (`docs/diagnostic-2026-09.md`): the same library set as the Console plus `setfenv`/`getfenv`, minus `debug`. Blackmagic's docs say nothing about the host's libraries, `bmd.*`, `fusion:*Prefs` or the free-edition sandbox; those facts are measured, not documented, and a point release can change them.
-- Lua never expands `~`: build every path from `os.getenv("HOME")` or the `RLB_STATE_DIR` header the server stamps into the Lua files at copy time. Page names for `OpenPage` are lowercase. `LoadProject` on a dirty project can raise a modal the bridge cannot answer, so `open_project` saves first by default and interactive render mode stays off. The shipped `Examples/*.lua` use deprecated calls and `os.exit`; they are reference for conventions only, the `.pyi` is the signature source.
+- Lua never expands `~`: build every path from `os.getenv("HOME")` or the `RLB_STATE_DIR` header the server stamps into the Lua files at copy time. The bridge holds the placeholder in a `[==[@@RLB_STATE_DIR@@]==]` literal and in its line-2 comment; the server replaces both verbatim and refuses a path containing `]==]`. Page names for `OpenPage` are lowercase. `LoadProject` on a dirty project can raise a modal the bridge cannot answer, so `open_project` saves first by default and interactive render mode stays off. The shipped `Examples/*.lua` use deprecated calls and `os.exit`; they are reference for conventions only, the `.pyi` is the signature source.
 
 ## Language servers: use them
 
