@@ -26,12 +26,13 @@ DaVinci Resolve 21.1 moved Python scripting and the external scripting API to th
 
 ## Install
 
-1. Get `davinci-resolve-lua-mcp.mcpb`. From a checkout, `make bundle` writes it to `dist/` (see [Development](#development)); otherwise use the bundle you were given.
-2. Open the `.mcpb` file (double-click, or `open dist/davinci-resolve-lua-mcp.mcpb`), or in Claude Desktop go to Settings > Extensions > Advanced settings > Install Extension... and pick the file. Accept the default settings; they are listed under [Settings](#settings).
-3. Claude Desktop launches the server. On its first launch the server copies `resolve_mcp_bridge.lua` and `claude_diag.lua` into `~/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Utility/`, the only Resolve folder it ever writes. Resolve lists them under `Workspace > Scripts` without a restart.
-4. Start the bridge (next section) and ask Claude "Are you connected to DaVinci Resolve?".
+1. Download the latest `davinci-resolve-lua-mcp.mcpb` from this repository's Releases page.
+2. Double-click the file, or drag it onto the Claude Desktop window. Claude Desktop shows the extension's details and four settings; keep the defaults and click **Install**.
+3. In Resolve, open a project and click `Workspace > Scripts > resolve_mcp_bridge`. The extension put that script there when it first started; Resolve's Console stays silent, which is expected.
+   - The script stops when Resolve quits. Click it again after every Resolve launch, before using the tools.
+4. Ask Claude "Are you connected to DaVinci Resolve?".
 
-Claude Desktop shows no dialog when you open a bundle whose extension id is already installed. To reinstall the same version, remove "DaVinci Resolve Lua MCP" under Settings > Extensions first, then open the `.mcpb` again.
+To update, download the new `.mcpb` and open it again; extensions installed from a file do not update on their own. To build the bundle yourself, see [Development](#development).
 
 ## Start and stop the bridge
 

@@ -62,7 +62,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   Rationale, trademark note and the migration record are in `docs/plan-review-2026-09.md` § R. Reinstalled and
   smoke-tested (24 PASS) under the new name the same day. `docs/diagnostic-2026-09.md`,
   `docs/research-2026-09.md` and plan-review §§ A-Q predate the rename and keep the old names on purpose.
-- **Step 6 is done (2026-09-21).** `README.md` (228 lines, written with the repository's `create-readme`
+- **Step 6 is done (2026-09-21).** `README.md` (229 lines, written with the repository's `create-readme`
   skill): tagline and why, features, requirements, install, start and stop,
   example prompts, the 15-tool table with a `run_lua` guide, the four settings and the eight `RLB_*`
   variables, 13 troubleshooting entries, security, uninstall, development (`make` targets, the dev-register loop, the
