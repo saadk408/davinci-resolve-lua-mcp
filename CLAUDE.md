@@ -93,3 +93,12 @@ Mirror of `docs/plan.md` "Safety and behaviour rules" (the original spec's rules
 - `bmd.readstring`/`bmd.writestring` are Lua-table serialisers, not file I/O.
 - The Console and the Scripts-menu host are different states; the menu host is what the bridge runs in. Step 1 measures it on this Mac. Blackmagic's docs say nothing about the host's libraries, `bmd.*`, `fusion:*Prefs` or the free-edition sandbox; those facts are community-measured (research § 3) until Step 1 confirms them.
 - Lua never expands `~`: build every path from `os.getenv("HOME")` or the `RLB_STATE_DIR` header the server stamps into the Lua files at copy time. Page names for `OpenPage` are lowercase. `LoadProject` on a dirty project can raise a modal the bridge cannot answer, so `open_project` saves first by default and interactive render mode stays off. The shipped `Examples/*.lua` use deprecated calls and `os.exit`; they are reference for conventions only, the `.pyi` is the signature source.
+
+## Working in this repo
+
+- A user-level PreToolUse hook blocks any Bash command whose text contains the literal `node_modules`, even inside `find -not -path` filters or heredoc bodies. Build the string at run time (`NM="node_""modules"`) or use the Write/Edit tools; do not retry the same command.
+- Source nvm before Node tooling: `. ~/.nvm/nvm.sh` then `node`/`npm`/`npx`. The `compdef:153: _comps: assignment to invalid subscript range` line they print is harmless zsh completion noise.
+- TypeScript SDK docs and versions: Context7 id `/modelcontextprotocol/typescript-sdk` (its `main` branch) is the current v2; ignore `__branch__v1.x`. Check versions by the v2 package names (`npm view @modelcontextprotocol/server version`); `npm view @modelcontextprotocol/sdk` only shows the legacy 1.x line and misled a previous session.
+- Claude Desktop launch diagnostics: `grep -h '\[MCP Launch\]\|\[UV Discovery\]' ~/Library/Logs/Claude/main*.log` shows how the host resolved and started an extension; installed manifests are at `~/Library/Application Support/Claude/Claude Extensions/<id>/manifest.json`. The host resolves the user's full login PATH for servers but maps bare `node` to its bundled Node.
+- `.claude/settings.json` enables the `mcp-server-dev` plugin for this repo; its `build-mcpb` skill is the packaging reference for Step 4 and `build-mcp-server` the tool-design reference.
+- Large reference sources (AutoSubs `autosubs_core.lua`, the MCPB schema) go into the session scratchpad via `curl`, then `grep`/`sed -n` the relevant lines; never fetch them whole into context.
