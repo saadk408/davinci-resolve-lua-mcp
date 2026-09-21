@@ -1,0 +1,88 @@
+// manifest.json (MCPB v0.4) must advertise exactly the tools the server registers, and the three
+// version strings (package.json, manifest.json, the server) must agree.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import * as fsp from 'node:fs/promises';
+import * as path from 'node:path';
+import { Client } from '@modelcontextprotocol/client';
+import { InMemoryTransport } from '@modelcontextprotocol/server';
+import { loadConfig } from '../src/config.js';
+import { DocsIndex } from '../src/docsSearch.js';
+import { silentLogger } from '../src/log.js';
+import type { Bridge } from '../src/protocol.js';
+import { createServer, SERVER_NAME, SERVER_VERSION } from '../src/server.js';
+import { makeTempDirs, repoRoot } from './helpers/tmp.js';
+
+interface Manifest {
+  manifest_version: string;
+  name: string;
+  version: string;
+  display_name: string;
+  server: { type: string; entry_point: string; mcp_config: { command: string; args: string[]; env: Record<string, string> } };
+  user_config: Record<string, { type: string; default?: unknown }>;
+  compatibility: { platforms: string[]; runtimes: { node: string } };
+  tools: Array<{ name: string; description: string }>;
+  tools_generated: boolean;
+}
+
+test('manifest.json tools equal tools/list and the versions agree', async () => {
+  const root = repoRoot();
+  const manifest = JSON.parse(await fsp.readFile(path.join(root, 'manifest.json'), 'utf8')) as Manifest;
+  const pkg = JSON.parse(await fsp.readFile(path.join(root, 'package.json'), 'utf8')) as { name: string; version: string };
+  assert.equal(manifest.manifest_version, '0.4');
+  assert.equal(manifest.name, SERVER_NAME);
+  assert.equal(pkg.name, SERVER_NAME);
+  assert.equal(manifest.version, SERVER_VERSION);
+  assert.equal(pkg.version, SERVER_VERSION);
+  assert.equal(manifest.display_name, 'DaVinci Resolve (Lua bridge)');
+  assert.equal(manifest.server.type, 'node');
+  assert.equal(manifest.server.entry_point, 'server/index.js');
+  assert.equal(manifest.server.mcp_config.command, 'node');
+  assert.deepEqual(manifest.server.mcp_config.args, ['${__dirname}/server/index.js']);
+  assert.deepEqual(manifest.server.mcp_config.env, {
+    RLB_SCRIPTS_DIR: '${user_config.scripts_dir}',
+    RLB_AUTO_INSTALL: '${user_config.auto_install_bridge}',
+    RLB_STATE_DIR: '${user_config.state_dir}',
+    RLB_DEFAULT_TIMEOUT_S: '${user_config.default_timeout_s}',
+  });
+  assert.deepEqual(Object.keys(manifest.user_config).sort(), ['auto_install_bridge', 'default_timeout_s', 'scripts_dir', 'state_dir']);
+  assert.deepEqual(manifest.compatibility.platforms, ['darwin']);
+  assert.equal(manifest.compatibility.runtimes.node, '>=20.0.0');
+  assert.equal(manifest.tools_generated, false);
+
+  const dirs = await makeTempDirs();
+  try {
+    const config = loadConfig({ RLB_STATE_DIR: dirs.stateDir, RLB_PREFS_DIR: dirs.prefsDir, RLB_DOCS_DIR: dirs.docsDir, RLB_SCRIPTS_DIR: dirs.scriptsDir }, dirs.root);
+    const bridge: Bridge = {
+      request: async () => {
+        throw new Error('unused');
+      },
+      status: async () => ({ alive: false, lock: { path: '', owned: true }, state_dir: dirs.stateDir }),
+    };
+    const server = createServer({
+      config,
+      bridge,
+      docs: new DocsIndex(config.docsDir),
+      install: async () => ({ outcome: 'up_to_date', message: '', scripts_dir: '', state_dir: '', files: [], checked_at: '' }),
+      logger: silentLogger,
+    });
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: 't', version: '0' });
+    await server.connect(st);
+    await client.connect(ct);
+    const { tools } = await client.listTools();
+    assert.deepEqual(
+      manifest.tools.map((t) => t.name).sort(),
+      tools.map((t) => t.name).sort(),
+      'manifest tools[] must list exactly the registered tools',
+    );
+    for (const t of manifest.tools) {
+      assert.ok(t.description.length > 20, `${t.name} has a manifest description`);
+      assert.ok(t.name.length <= 64);
+    }
+    await client.close();
+    await server.close();
+  } finally {
+    await dirs.cleanup();
+  }
+});

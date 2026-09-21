@@ -19,8 +19,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   `scripts/gen-types.mjs` generates the API classes in `types/resolve_host.d.lua` from the `.pyi`;
   the `Makefile` has `test-lua`, `check-bridge`, `lint-lua`, `gen-types`. The deviations from the
   protocol text as first written, and the fixes from the review that followed the commit, are in
-  `docs/plan-review-2026-09.md` § M and folded into `docs/plan.md`. Next is Step 3 (the
-  TypeScript server), then Steps 4-7 in order.
+  `docs/plan-review-2026-09.md` § M and folded into `docs/plan.md`.
+- **Step 3 is done (2026-09-20).** `src/` (nine modules, v2 SDK, CJS build to `server/index.js`),
+  `tests/*.test.ts` (64 `node --test` cases through tsx: fake bridge + temp dirs, in-memory
+  `Client`, three `fuscript`-backed tests), `manifest.json` (v0.4, parity-tested), `package.json`,
+  `tsconfig.json`, `tests/check_server.sh`, and the `Makefile` targets `build`, `test-node`,
+  `check-server`, `typecheck`, `inspect`. The built server answered the Inspector CLI and a
+  stdio probe (15 tools, `resolve_status` reporting `never_started`). Decisions are in
+  `docs/plan-review-2026-09.md` § N and folded into `docs/plan.md` "Protocol v1". The
+  Inspector's acceptance run performed the first-run self-install into the real Utility folder
+  (`resolve_lua_bridge.lua` now sits next to `claude_diag.lua`). Next is Step 4 (bundle pipeline,
+  `.mcpbignore`, `mcpb validate/pack`, `dev-register`), then Steps 5-7 in order.
 - Git repository on `main`; `.gitignore` covers `.DS_Store`, `.remember/`, `.venv/`, `node_modules/`, `dist/`, `server/`.
 
 ## Hard gates, in order
@@ -59,7 +68,7 @@ bridge/resolve_lua_bridge.lua (Scripts-menu Lua state, holds live `resolve`)
       run needs the exact session id ("*" is for ping and stop only); a failed start save is retried once a second
 ```
 
-Layout: `manifest.json` (MCPB v0.4), `package.json`, `tsconfig.json`, `.mcpbignore`, `src/` (`index.ts`, `server.ts` with the 15 tools, `config.ts`, `protocol.ts`, `prefs.ts`, `lua.ts`, `docsSearch.ts`, `bridgeInstall.ts`, `log.ts`), `server/index.js` (esbuild output, git-ignored, shipped), `bridge/resolve_lua_bridge.lua` (one dependency-free file, under 600 lines), `scripts/` (`claude_diag.lua`, `gen-types.mjs`, `dev-register.mjs`, `smoke.mjs`), `tests/` (`node --test` via `tsx`; `tests/lua/` under `fuscript`), `dist/` (packed bundle, git-ignored), `Makefile`, `README.md`. Developer-only, must be listed in `.mcpbignore`: `.luarc.json`, `types/`, `scripts/gen-types.mjs`, `tests/`, `Makefile`, `.out/` (Lua LSP configuration, generated host-global definitions and the test tooling, see "Working in this repo").
+Layout: `manifest.json` (MCPB v0.4, since Step 3), `package.json`, `tsconfig.json`, `.mcpbignore` (Step 4), `src/` (`index.ts`, `server.ts` with the 15 tools, `config.ts`, `protocol.ts`, `prefs.ts`, `lua.ts`, `docsSearch.ts`, `bridgeInstall.ts`, `log.ts`), `server/index.js` (esbuild output, git-ignored, shipped), `bridge/resolve_lua_bridge.lua` (one dependency-free file, under 600 lines), `scripts/` (`claude_diag.lua`, `gen-types.mjs`, `dev-register.mjs`, `smoke.mjs`), `tests/` (`*.test.ts` under `node --test` via `tsx`, `helpers/`, `check_server.sh`; `tests/lua/` under `fuscript`), `dist/` (packed bundle, git-ignored), `Makefile`, `README.md`. Developer-only, must be listed in `.mcpbignore`: `.luarc.json`, `types/`, `scripts/gen-types.mjs`, `tests/`, `Makefile`, `.out/`, `tsconfig.json`, `package-lock.json` (Lua LSP configuration, generated host-global definitions and the test tooling, see "Working in this repo").
 
 Runtime state: `RLB_STATE_DIR` (default `~/.resolve-lua-bridge/`, 0700) holding `next.lua`, `next.lua.tmp`, `lock` (pid, O_EXCL), `server.log`. No queue subdirectories, no heartbeat file, no stop file.
 
@@ -67,16 +76,20 @@ Runtime state: `RLB_STATE_DIR` (default `~/.resolve-lua-bridge/`, 0700) holding 
 
 Real targets (`Makefile`; the Node targets source nvm themselves):
 
-- `make test` (= `make test-lua` until Step 3 adds the node tests): `tests/lua/check_bridge.sh` (line count under 600, the two header lines, forbidden calls on comment-stripped lines, exactly one `:SetPrefs(`/`:SavePrefs(`/`:GetPrefs(` call site), then `fuscript -l lua tests/lua/run_tests.lua` against stub objects in a `mktemp -d` scratch dir. It passes only when the log ends with `RLB_TESTS_RESULT: PASS`, because `fuscript` exits 0 whatever the script does.
+- `make test` = `make test-lua` + `make test-node`.
+- `make test-lua`: `tests/lua/check_bridge.sh` (line count under 600, the two header lines, forbidden calls on comment-stripped lines, exactly one `:SetPrefs(`/`:SavePrefs(`/`:GetPrefs(` call site), then `fuscript -l lua tests/lua/run_tests.lua` against stub objects in a `mktemp -d` scratch dir. It passes only when the log ends with `RLB_TESTS_RESULT: PASS`, because `fuscript` exits 0 whatever the script does.
+- `make test-node`: `tests/check_server.sh` (no `console.log`/`process.stdout`, no `child_process`, no network modules or listeners in `src/`, no raw template hole inside a quoted Lua string in `lua.ts`), `npm run typecheck` (`tsc --noEmit`), then `npm test` = `node --import tsx --test tests/*.test.ts` (64 cases, about 3 s; every fixture is a temp dir; the three `fuscript`-backed tests skip themselves when Resolve is absent).
+- `make build`: `tsc --noEmit`, then `esbuild src/index.ts --bundle --platform=node --format=cjs --target=node20 --outfile=server/index.js` (about 900 KB, git-ignored, shipped in the bundle).
+- `make inspect`: `make build`, then `npx @modelcontextprotocol/inspector --cli node server/index.js -- --method tools/list`. The Inspector spawns the server with a filtered environment, so it runs with the production defaults: real state dir, real prefs file, and the first-run self-install into the real Utility folder.
 - `make lint-lua`: `node scripts/gen-types.mjs --check` (the generated types block matches the installed `.pyi`), then `lua-language-server --check` of the workspace at Warning level as JSON in `.out/luals-check.json`; fails on any diagnostic under `bridge/` or `tests/` (the diag script's accepted warnings do not count).
 - `make gen-types`: rebuild the generated block of `types/resolve_host.d.lua` after a Resolve update changes the `.pyi` or README.
+- `make clean`: removes `server/`, `dist/`, `.out/`.
 - Syntax check of one Lua file: `"/Applications/DaVinci Resolve/DaVinci Resolve.app/Contents/Libraries/Fusion/fuscript" -l lua -x 'assert(loadfile("<abs>/file.lua")); print("ok")'` (absolute paths; the tool prints a two-line banner on stdout, filter it with `grep -v -e '^DaVinci Resolve Script' -e '^Copyright'`).
+- Drive the built server by hand: pipe JSON-RPC lines (`initialize`, `notifications/initialized`, `tools/list`, `tools/call`) into `RLB_STATE_DIR=<tmp> RLB_AUTO_INSTALL=false node server/index.js`; the answers come back one per line on stdout, the log on stderr. In-flight calls finish after stdin closes (5 s grace).
 
 Planned targets (update this section once they are real):
 
 ```sh
-make build         # tsc --noEmit + esbuild -> server/index.js
-make test          # gains node --test (tsx) next to test-lua
 make bundle        # build + mcpb validate + mcpb pack . dist/resolve-lua-bridge.mcpb + mcpb info
 make install       # bundle, then open the .mcpb so Claude Desktop shows its install dialog
 make dev-register  # developer loop: merge a claude_desktop_config.json entry pointing at server/index.js
@@ -152,3 +165,6 @@ When and how to use them:
 - Tests load the bridge with `assert(loadfile(path))("RLB_BRIDGE_TESTING")`: a chunk vararg the menu host never passes makes the bridge return its internals instead of starting the loop. The harness replaces `bmd` as well (`rawset(_G, "bmd", stub)`) so `bmd.wait` is a no-op and `bmd.gettime` is a clock the tests advance; `start({resolve, fusion, state_dir, getenv})` injects the rest.
 - LuaLS headless: `lua-language-server --check <dir> --checklevel=Warning --check_format=json --check_out_path=<file>` writes a JSON object keyed by `file://` URI (no file when clean) and exits 1 whenever any diagnostic exists anywhere, so `make lint-lua` greps the report for `bridge/` and `tests/`. To probe the generated types, drop a scratch `.lua` under the repo, run the check, delete it.
 - Editing the bridge: `tests/lua/check_bridge.sh` counts call sites (`:SetPrefs(`, `:SavePrefs(`, `:GetPrefs(` exactly once each) and greps forbidden names on comment-stripped lines, so a new prefs call or a `debug.`/`io.`/`require` reference fails `make test-lua` by design; reach `debug` through `gread` and keep prefs writes inside `set_pref`/`save_prefs`.
+- TypeScript layout facts (Step 3): the package is CJS (no `"type": "module"`), `tsconfig` is `module: NodeNext` in CJS mode, so relative imports end in `.js`, `__dirname` works, and a test file cannot use top-level `await` (use `existsSync` for skip conditions). `@types/node` is pinned to 20 so `tsc` rejects Node 21+ APIs. `import * as z from 'zod/v4'`; `InMemoryTransport` comes from `@modelcontextprotocol/server`, `Client` from `@modelcontextprotocol/client`. `outputSchema` uses `z.looseObject` because the v2 client rejects extra keys in `structuredContent` against a strict `z.object`, and `isError` results skip output validation.
+- Node tests never touch `~/Library` or `/Library`: `RLB_STATE_DIR`, `RLB_PREFS_DIR`, `RLB_DOCS_DIR` and `RLB_SCRIPTS_DIR` point at `tests/helpers/tmp.ts` temp dirs; `tests/helpers/fakeBridge.ts` answers `next.lua` by rewriting a Fusion-format prefs file (tmp + rename) and models the bridge's id de-duplication, single-save stop and failure modes (`silent`, `late`, `wrong_id`, `half_written`, `garbage_hex`, `garbage_json`). Tool tests use a recording `Bridge` stub (`createServer` takes the `Bridge` interface) and assert on the captured Lua.
+- The MCP Inspector CLI does not forward `RLB_*` shell variables to the server it spawns (SDK default environment); a run against the built server uses the production paths and self-installs the scripts. Use the hand-driven stdio pipe with `RLB_STATE_DIR`/`RLB_AUTO_INSTALL=false` when that is unwanted.

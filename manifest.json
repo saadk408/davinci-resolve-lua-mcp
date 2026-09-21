@@ -1,0 +1,86 @@
+{
+  "$schema": "https://raw.githubusercontent.com/modelcontextprotocol/mcpb/main/dist/manifest.schema.json",
+  "manifest_version": "0.4",
+  "name": "resolve-lua-bridge",
+  "display_name": "DaVinci Resolve (Lua bridge)",
+  "version": "0.1.0",
+  "description": "Control DaVinci Resolve 21.1 (free edition, macOS) from Claude through a Lua script that runs inside Resolve.",
+  "long_description": "DaVinci Resolve 21.1 removed Python and external scripting from the free edition. This extension talks to Resolve through the one door left: a Lua script launched from Workspace > Scripts inside Resolve, which holds the live `resolve` object and executes Lua on behalf of the server. The server writes request files, the script answers through Fusion preferences; no network is involved. On first run the server copies its two Lua scripts into Resolve's user Utility scripts folder. Then, in Resolve, open a project and run Workspace > Scripts > resolve_lua_bridge.",
+  "author": {
+    "name": "Saad Khan"
+  },
+  "license": "MIT",
+  "keywords": ["davinci-resolve", "video-editing", "lua", "blackmagic", "mcp"],
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/server/index.js"],
+      "env": {
+        "RLB_SCRIPTS_DIR": "${user_config.scripts_dir}",
+        "RLB_AUTO_INSTALL": "${user_config.auto_install_bridge}",
+        "RLB_STATE_DIR": "${user_config.state_dir}",
+        "RLB_DEFAULT_TIMEOUT_S": "${user_config.default_timeout_s}"
+      }
+    }
+  },
+  "user_config": {
+    "scripts_dir": {
+      "type": "directory",
+      "title": "Resolve user scripts folder",
+      "description": "Resolve's user Utility scripts folder. The two Lua scripts are copied here so they appear under Workspace > Scripts. Only this folder is ever written.",
+      "default": "${HOME}/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Utility",
+      "required": false
+    },
+    "auto_install_bridge": {
+      "type": "boolean",
+      "title": "Install the bridge scripts automatically",
+      "description": "Copy (and update) resolve_lua_bridge.lua and claude_diag.lua into the scripts folder when the server starts.",
+      "default": true,
+      "required": false
+    },
+    "state_dir": {
+      "type": "directory",
+      "title": "State directory",
+      "description": "Where the request file, the lock and the server log live (created with mode 0700).",
+      "default": "${HOME}/.resolve-lua-bridge",
+      "required": false
+    },
+    "default_timeout_s": {
+      "type": "number",
+      "title": "Default tool timeout (seconds)",
+      "description": "How long a tool waits for the bridge before giving up, 1 to 300.",
+      "default": 30,
+      "min": 1,
+      "max": 300,
+      "required": false
+    }
+  },
+  "compatibility": {
+    "claude_desktop": ">=1.0.0",
+    "platforms": ["darwin"],
+    "runtimes": {
+      "node": ">=20.0.0"
+    }
+  },
+  "tools": [
+    { "name": "resolve_status", "description": "Whether the in-Resolve Lua bridge is running and reachable, why not, its session, the self-install outcome and, when alive, product, version, edition, page and project." },
+    { "name": "run_lua", "description": "Run a Lua 5.1 chunk inside DaVinci Resolve with the live resolve object; returns its first return value as JSON plus captured prints and errors." },
+    { "name": "get_project_info", "description": "Overview of the open project: name, page, database, frame rate, resolution, timeline count, root-bin counts and the current timeline." },
+    { "name": "list_projects", "description": "Projects in the current project-manager folder with dates and notes; marks the open one." },
+    { "name": "list_timelines", "description": "Every timeline of the open project with unique id, frame range and track counts; marks the current one." },
+    { "name": "list_media_pool_clips", "description": "Clips in one Media Pool bin with path, duration, fps, resolution, type, frames and colour; paginated." },
+    { "name": "get_timeline_items", "description": "Items on one track of the current timeline with type, frames, source frames, enabled state and file path; paginated." },
+    { "name": "add_marker", "description": "Add a marker to the current timeline at a frame relative to the timeline start; returns the stored marker." },
+    { "name": "delete_markers", "description": "Delete every marker of one colour, or all markers, from the current timeline; requires confirm=true." },
+    { "name": "set_current_timeline", "description": "Make the named timeline the current one; an unknown name lists the known timelines." },
+    { "name": "open_project", "description": "Load the named project, saving the open one first by default; an unknown name lists the known projects." },
+    { "name": "render_current_timeline", "description": "Queue and start a render of the current timeline into an existing directory, optionally from a named preset; returns the job id." },
+    { "name": "get_render_status", "description": "Status, completion percentage and error of one render job, plus whether Resolve is rendering." },
+    { "name": "stop_bridge", "description": "Ask the in-Resolve bridge loop to exit cleanly; it must be relaunched from Workspace > Scripts afterwards." },
+    { "name": "scripting_api_docs", "description": "Search Blackmagic's shipped Resolve scripting reference (.pyi signatures, README sections, CHANGELOG) with file and line; flags deprecated and unsupported calls." }
+  ],
+  "tools_generated": false,
+  "privacy_policies": []
+}

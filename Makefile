@@ -1,13 +1,14 @@
-# resolve-lua-bridge developer targets (docs/plan.md). Step 2 adds the Lua targets; Step 3 adds
-# build/test-node, Step 4 bundle/install/dev-register, Step 5 smoke/stop. Node targets source nvm.
+# resolve-lua-bridge developer targets (docs/plan.md). Step 2 added the Lua targets, Step 3 the
+# Node targets (build, test-node, check-server, inspect); Step 4 adds bundle/install/dev-register,
+# Step 5 smoke/stop. Node targets source nvm themselves.
 SHELL := /bin/zsh
 FUSCRIPT := /Applications/DaVinci Resolve/DaVinci Resolve.app/Contents/Libraries/Fusion/fuscript
 NVM := . $$HOME/.nvm/nvm.sh >/dev/null 2>&1
 OUT := $(CURDIR)/.out
 
-.PHONY: test test-lua check-bridge lint-lua gen-types
+.PHONY: test test-lua test-node check-bridge check-server lint-lua gen-types typecheck build inspect clean
 
-test: test-lua
+test: test-lua test-node
 
 ## Lua tests under fuscript (stub Resolve objects, never touches the app) plus the grep gates.
 ## fuscript exits 0 whatever the script does, so the RLB_TESTS_RESULT marker line is the gate.
@@ -19,6 +20,26 @@ test-lua: check-bridge
 
 check-bridge:
 	@sh tests/lua/check_bridge.sh bridge/resolve_lua_bridge.lua
+
+## Node tests (node --test through tsx, in temp directories; the two fuscript-backed tests skip
+## themselves when Resolve is not installed) after the src/ grep gates and the type check.
+test-node: check-server typecheck
+	@$(NVM) && npm test
+
+check-server:
+	@sh tests/check_server.sh src
+
+typecheck:
+	@$(NVM) && npm run typecheck
+
+## tsc --noEmit, then esbuild bundles src/index.ts (+ SDK + zod) into server/index.js (cjs, node20).
+build:
+	@$(NVM) && npm run build
+	@ls -la server/index.js
+
+## Ask the built server for its tool list through the MCP Inspector in CLI mode.
+inspect: build
+	@$(NVM) && npx --yes @modelcontextprotocol/inspector --cli node server/index.js -- --method tools/list
 
 ## Lua LSP check (bridge/ and tests/ must be clean; scripts/claude_diag.lua keeps its accepted
 ## warnings) and the generated types block must match the installed .pyi. lua-language-server
@@ -39,3 +60,6 @@ lint-lua:
 ## Regenerate the API classes in types/resolve_host.d.lua from Blackmagic's .pyi and README.
 gen-types:
 	@$(NVM) && node scripts/gen-types.mjs
+
+clean:
+	@rm -rf server dist "$(OUT)"
