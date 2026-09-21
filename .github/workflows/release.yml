@@ -1,0 +1,62 @@
+# Release on a version tag. tests.yml runs on branch pushes and pull requests only, so a tag push
+# gets no gate from it: this workflow re-runs the Node gates (make test-node) and the bundle gate
+# (make bundle) on the tagged commit before anything is published. The Lua tests and `make smoke`
+# need DaVinci Resolve and stay local: `make test` and the smoke run precede the tag.
+#
+# Every `mcpb pack` gives different bytes (zip mtimes), so a published tag is never re-run: the
+# guard below and `gh release create` both refuse when a release for the tag exists. Fix forward
+# and cut a new tag. gh uploads the asset into a draft and deletes the draft on failure, so a
+# failure before "Publish" leaves nothing behind and a re-run is safe only then. GitHub marks the
+# release "Latest" on its own (higher version, later date), which is what
+# releases/latest/download/davinci-resolve-lua-mcp.mcpb follows.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  BUNDLE: dist/davinci-resolve-lua-mcp.mcpb
+  GH_TOKEN: ${{ github.token }}
+  GH_REPO: ${{ github.repository }}
+
+jobs:
+  release:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+      - name: Tag equals the package and manifest versions
+        run: |
+          pkg="v$(node -p "require('./package.json').version")"
+          man="v$(node -p "require('./manifest.json').version")"
+          if [ "$GITHUB_REF_NAME" != "$pkg" ] || [ "$GITHUB_REF_NAME" != "$man" ]; then
+            echo "::error::tag $GITHUB_REF_NAME, package.json $pkg, manifest.json $man"
+            exit 1
+          fi
+      - name: No release for this tag yet
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "::error::a release for $GITHUB_REF_NAME exists; a published tag is never re-packed, cut a new tag"
+            exit 1
+          fi
+      - run: npm ci
+      - run: make test-node
+      - run: make bundle
+      - name: Release notes
+        run: |
+          TAG="$GITHUB_REF_NAME" bash scripts/release-notes.sh "$BUNDLE" > "$RUNNER_TEMP/notes.md"
+          cat "$RUNNER_TEMP/notes.md"
+      - name: Publish
+        run: gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md" "$BUNDLE"

@@ -105,9 +105,10 @@ bridge/resolve_mcp_bridge.lua (Scripts-menu Lua state, holds live `resolve`)
 - Layout: `src/` (ten modules; `main.ts` is the wiring, `server.ts` the tools, `lua.ts` the snippets,
   `protocol.ts` the slot and lock, `prefs.ts` the reader, `bridgeInstall.ts` the self-install),
   `server/index.js` (built, git-ignored, shipped), `bridge/resolve_mcp_bridge.lua`, `scripts/`
-  (`claude_diag.lua` ships; `gen-types.mjs`, `dev-register.mjs`, `smoke.mjs` are developer-only),
-  `types/resolve_host.d.lua` + `.luarc.json` (Lua LSP), `tests/`, `docs/images/` (README screenshots;
-  the MP4 recordings are git-ignored, GitHub-hosted), `.github/workflows/tests.yml`, `SECURITY.md`.
+  (`claude_diag.lua` ships; `gen-types.mjs`, `dev-register.mjs`, `smoke.mjs`, `release-notes.sh` are
+  developer-only), `types/resolve_host.d.lua` + `.luarc.json` (Lua LSP), `tests/`, `docs/images/`
+  (README screenshots; the MP4 recordings are git-ignored, GitHub-hosted), `.github/workflows/`
+  (`tests.yml`, `release.yml`), `SECURITY.md`.
   `tsconfig.json` covers `src/` and `tests/` only. The bundle is exactly the eight files allowlisted
   in `tests/check_bundle.sh`; anything new goes into `.mcpbignore` (directories without trailing
   slashes: `mcpb pack` walks with the `ignore` package after built-in excludes that do not cover
@@ -144,14 +145,23 @@ Targets (`Makefile`; the README has the table): `test` = `test-lua` + `test-node
 - `make dev-register` merges a `davinci-resolve-lua-mcp-dev` entry into the real config after backing
   it up (flags in the script). A code change then needs `make build` and a Claude Desktop restart.
 - CI (`.github/workflows/tests.yml`) runs `make test-node` and `make bundle` on macOS with Node 20
-  and 24. The Lua tests and the smoke test need Resolve and stay local.
+  and 24 for branch pushes and pull requests; it ignores tag pushes. `release.yml` runs on a `v*`
+  tag push: a guard that the tag equals `v` + the `package.json` and `manifest.json` versions, a
+  guard that no release exists for the tag, `make test-node`, `make bundle`,
+  `scripts/release-notes.sh`, then `gh release create` with the bundle attached (the README's
+  `releases/latest/download/...` link follows it). The Lua tests and the smoke test need Resolve
+  and stay local.
 - Releasing: bump `package.json` (`npm version --no-git-tag-version`), `manifest.json` and
   `SERVER_VERSION`; when the Lua changed, also the bridge header (line 1 and `VERSION`),
   `claude_diag.lua` (line 1 and `SCRIPT`), `BRIDGE_TAG` in `tests/helpers/fakeBridge.ts` and the
   envelope in `tests/prefs.test.ts`. Then `make lint-lua`, `make test`, `make bundle`, CI green,
   `make install` (the user's click), the user relaunches the script, `make smoke` on a scratch
-  project, tag `vX.Y.Z`, a GitHub Release with `dist/*.mcpb` attached (never committed) and its
-  sha256 in the notes. `SECURITY.md` promises support for the latest release only.
+  project. Then an annotated tag (`git tag -a vX.Y.Z`: its message becomes the intro of the release
+  notes; a lightweight tag gets a one-line default) and `git push origin vX.Y.Z` (never `--tags`):
+  the workflow gates, packs and publishes the release with the sha256 in the notes. The locally
+  installed bundle is a different pack of the same files (`mcpb pack` never gives the same bytes
+  twice), so `dist/` is never committed and a published tag is never re-run; fix forward with a new
+  tag. `SECURITY.md` promises support for the latest release only.
 
 ## Tests
 
