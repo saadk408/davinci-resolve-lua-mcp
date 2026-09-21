@@ -1,7 +1,7 @@
 // main(): the wiring behind index.ts, driven in-process through its runtime seams (a fake process,
 // the server half of an in-memory transport, temp directories): the no-hook path, the wrapServer,
-// onToolFailure and beforeExit extension points, the beforeExit cap, and the lock on every exit
-// path. Nothing here touches the real process handlers, stdio or ~/Library.
+// onToolFailure and beforeExit extension points, the beforeExit cap, and the per-request lock on
+// every exit path (never held while idle; released when a crash interrupts a request). Nothing here touches the real process handlers, stdio or ~/Library.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
@@ -10,6 +10,7 @@ import { Client } from '@modelcontextprotocol/client';
 import { InMemoryTransport, McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 import { main, type MainHandle, type MainOptions } from '../src/main.js';
+import { startFakeBridge } from './helpers/fakeBridge.js';
 import { exists, makeTempDirs, waitFor, type TempDirs } from './helpers/tmp.js';
 
 class FakeProc extends EventEmitter {
@@ -58,14 +59,23 @@ async function rig(options: Omit<MainOptions, 'runtime'> = {}, beforeExitCapMs =
   };
 }
 
-test('main() without options serves the 15 tools, takes the lock and releases it on SIGTERM', async () => {
+/** A request the (silent) fake bridge never answers, so the lock stays held while it is pending. */
+async function holdSlot(r: Rig): Promise<{ pending: Promise<unknown>; stop: () => void }> {
+  const fake = await startFakeBridge({ stateDir: r.dirs.stateDir, prefsDir: r.dirs.prefsDir, mode: 'silent' });
+  const pending = r.client.callTool({ name: 'run_lua', arguments: { code: 'return 1', timeout_s: 1 } });
+  await waitFor(() => exists(r.lockPath));
+  return { pending, stop: () => fake.stop() };
+}
+
+test('main() without options serves the 15 tools, never holds the lock while idle and exits 0 on SIGTERM', async () => {
   const r = await rig();
   try {
     const { tools } = await r.client.listTools();
     assert.equal(tools.length, 15);
-    assert.ok(await exists(r.lockPath), 'the lock is taken at start');
+    assert.equal(await exists(r.lockPath), false, 'no lock while idle');
     const status = await r.client.callTool({ name: 'resolve_status', arguments: {} });
     assert.notEqual(status.isError, true);
+    assert.equal(await exists(r.lockPath), false, 'released after the status ping');
     r.proc.emit('SIGTERM');
     await r.handle.shutdown('test', 0);
     assert.deepEqual(r.proc.exits, [0]);
@@ -120,12 +130,14 @@ test('a crash runs beforeExit, exits 1 and releases the lock', async () => {
     },
   });
   try {
-    assert.ok(await exists(r.lockPath));
+    const slot = await holdSlot(r);
     r.proc.emit('uncaughtException', new Error('boom'));
     await waitFor(() => r.proc.exits.length > 0);
     assert.deepEqual(r.proc.exits, [1]);
     assert.deepEqual(events, ['beforeExit']);
-    assert.equal(await exists(r.lockPath), false);
+    assert.equal(await exists(r.lockPath), false, 'the lock of the in-flight request is released on the crash path');
+    await slot.pending;
+    slot.stop();
   } finally {
     await r.close();
   }
@@ -186,9 +198,11 @@ test('onToolFailure passed to main() reaches the tools; shutdown is idempotent',
 test("the process 'exit' backstop releases the lock", async () => {
   const r = await rig();
   try {
-    assert.ok(await exists(r.lockPath));
+    const slot = await holdSlot(r);
     r.proc.emit('exit');
     assert.equal(await exists(r.lockPath), false);
+    await slot.pending;
+    slot.stop();
   } finally {
     await r.close();
   }

@@ -125,10 +125,18 @@ export async function main(options: MainOptions = {}): Promise<MainHandle> {
     pid: proc.pid,
   });
   bridge = client;
+  // The lock is taken per request, never held while idle (Claude Desktop keeps an idle era-probe
+  // sibling of the server alive all session; a startup lock would sit with it). Startup hygiene
+  // takes it for a moment: a request file left by an earlier server would make a bridge launched
+  // later pre-seed its last_id from it.
   if (await client.acquireLock()) {
-    await client.removeStaleRequest();
+    try {
+      await client.removeStaleRequest();
+    } finally {
+      client.releaseLockSync();
+    }
   } else {
-    log.warn('request slot lock is held by another server; tools will report it until it is released', client.lock);
+    log.info('request slot busy at startup; leftover-request check skipped', client.lock);
   }
 
   const docs = new DocsIndex(config.docsDir);

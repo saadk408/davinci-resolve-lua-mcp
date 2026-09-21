@@ -63,6 +63,7 @@ export type StatusReason =
   | 'prefs_missing'
   | 'lock_held';
 
+/** `owned` is true only while this process is inside a request; `holder_pid` is another live process inside one. */
 export interface LockStatus {
   path: string;
   owned: boolean;
@@ -109,6 +110,8 @@ export const REQUEST_FILE = 'next.lua';
 export const REQUEST_TMP_FILE = 'next.lua.tmp';
 export const LOCK_FILE = 'lock';
 export const FORCED_READ_EVERY = 20;
+/** How often a request re-tries a lock held by another live server (ms). */
+const LOCK_POLL_MS = 50;
 
 export function defaultIsPidAlive(pid: number): boolean {
   try {
@@ -154,6 +157,7 @@ export class BridgeClient implements Bridge {
   private chain: Promise<unknown> = Promise.resolve();
   private lockOwned = false;
   private lockHolder: number | undefined;
+  private lockProblem: string | undefined;
 
   constructor(opts: BridgeClientOptions) {
     this.stateDir = opts.stateDir;
@@ -180,62 +184,90 @@ export class BridgeClient implements Bridge {
   // ---- lock -------------------------------------------------------------------------------
 
   /**
-   * Take `<stateDir>/lock` (created with `wx`, holding our pid). A dead holder is taken over by
-   * renaming the stale file away first, so two servers racing on the same dead lock cannot both
-   * win. Returns true when we own the lock.
+   * Take `<stateDir>/lock` (a hard link of a pid file, so it always holds our pid) for one request. The lock is held
+   * only while a request is in flight, never while idle: Claude Desktop keeps an idle "era probe"
+   * sibling of the server alive for the whole session, so a lock taken at startup would sit with
+   * that sibling for ever (measured 2026-09-21). A dead holder is taken over by renaming the stale
+   * file away first, so two servers racing on the same dead lock cannot both win; a live holder is
+   * waited for up to `waitMs`. Returns true when we own the lock.
    */
-  async acquireLock(): Promise<boolean> {
-    if (this.lockOwned) return true;
-    for (let attempt = 0; attempt < 4; attempt++) {
-      try {
-        const fh = await fsp.open(this.lockPath, 'wx');
+  async acquireLock(waitMs = 0): Promise<boolean> {
+    const deadline = this.now() + waitMs;
+    for (;;) {
+      const r = await this.tryLock();
+      if (r !== 'held') return r === 'owned';
+      const left = deadline - this.now();
+      if (left <= 0) return false;
+      await this.sleep(Math.min(LOCK_POLL_MS, left));
+    }
+  }
+
+  /**
+   * One pass over the lock file: owned, held by a live pid, or a file-system problem. The lock is
+   * created by hard-linking a pid file into place: `link` fails with EEXIST when the lock exists and
+   * the new file already holds our pid, so no reader can ever see an empty lock and mistake a live
+   * owner for a stale one (an `open(wx)` + write pair had that window, and two racing servers could
+   * both end up owning the slot).
+   */
+  private async tryLock(): Promise<'owned' | 'held' | 'error'> {
+    if (this.lockOwned) return 'owned';
+    const pidFile = `${this.lockPath}.${this.pid}.pid`;
+    try {
+      await fsp.writeFile(pidFile, `${this.pid}\n`);
+    } catch (err) {
+      this.log.warn('lock: cannot write the pid file', err);
+      this.lockProblem = (err as Error).message;
+      return 'error';
+    }
+    try {
+      for (let attempt = 0; attempt < 4; attempt++) {
         try {
-          await fh.writeFile(`${this.pid}\n`);
-        } finally {
-          await fh.close();
-        }
-        const check = await this.readLockPid();
-        if (check === this.pid) {
+          await fsp.link(pidFile, this.lockPath);
           this.lockOwned = true;
           this.lockHolder = undefined;
+          this.lockProblem = undefined;
           this.log.debug('lock acquired', { path: this.lockPath });
-          return true;
+          return 'owned';
+        } catch (err) {
+          if (errnoCode(err) !== 'EEXIST') {
+            this.log.warn('lock: cannot create', err);
+            this.lockOwned = false;
+            this.lockProblem = (err as Error).message;
+            return 'error';
+          }
         }
-        continue; // someone replaced it between our write and read
-      } catch (err) {
-        if (errnoCode(err) !== 'EEXIST') {
-          this.log.warn('lock: cannot create', err);
+        const holder = await this.readLockPid();
+        if (holder === this.pid) {
+          this.lockOwned = true;
+          this.lockHolder = undefined;
+          return 'owned';
+        }
+        if (holder !== undefined && this.isPidAlive(holder)) {
           this.lockOwned = false;
-          return false;
+          this.lockHolder = holder;
+          return 'held';
+        }
+        // Dead (or unreadable) holder: exactly one process wins the rename.
+        const stale = `${this.lockPath}.stale.${this.pid}`;
+        try {
+          await fsp.rename(this.lockPath, stale);
+          await fsp.unlink(stale).catch(() => undefined);
+          this.log.info('lock: took over a stale lock', { holder });
+        } catch (err) {
+          if (errnoCode(err) !== 'ENOENT') {
+            this.log.warn('lock: cannot take over', err);
+            this.lockOwned = false;
+            this.lockProblem = (err as Error).message;
+            return 'error';
+          }
         }
       }
-      const holder = await this.readLockPid();
-      if (holder === this.pid) {
-        this.lockOwned = true;
-        this.lockHolder = undefined;
-        return true;
-      }
-      if (holder !== undefined && this.isPidAlive(holder)) {
-        this.lockOwned = false;
-        this.lockHolder = holder;
-        return false;
-      }
-      // Dead (or unreadable) holder: exactly one process wins the rename.
-      const stale = `${this.lockPath}.stale.${this.pid}`;
-      try {
-        await fsp.rename(this.lockPath, stale);
-        await fsp.unlink(stale).catch(() => undefined);
-        this.log.info('lock: took over a stale lock', { holder });
-      } catch (err) {
-        if (errnoCode(err) !== 'ENOENT') {
-          this.log.warn('lock: cannot take over', err);
-          this.lockOwned = false;
-          return false;
-        }
-      }
+      this.lockOwned = false;
+      this.lockProblem = 'the lock file kept changing under us';
+      return 'error';
+    } finally {
+      await fsp.unlink(pidFile).catch(() => undefined);
     }
-    this.lockOwned = false;
-    return false;
   }
 
   private async readLockPid(): Promise<number | undefined> {
@@ -260,17 +292,32 @@ export class BridgeClient implements Bridge {
     }
   }
 
-  private async ensureLock(): Promise<void> {
-    if (await this.acquireLock()) return;
+  private async ensureLock(waitMs: number): Promise<void> {
+    if (await this.acquireLock(waitMs)) return;
     const holder = this.lockHolder;
+    if (holder === undefined) {
+      throw new BridgeError(
+        'lock_held',
+        `cannot take the request slot lock ${this.lockPath} (${this.lockProblem ?? 'unknown problem'})`,
+        'check that RLB_STATE_DIR is writable, or point RLB_STATE_DIR elsewhere',
+        { lock: this.lockPath },
+      );
+    }
     throw new BridgeError(
       'lock_held',
-      holder === undefined
-        ? `another server holds the request slot lock ${this.lockPath}`
-        : `another server (pid ${holder}) holds the request slot lock ${this.lockPath}`,
-      'stop the other resolve-lua-bridge server (a second Claude Desktop entry or a dev-register loop), or point RLB_STATE_DIR elsewhere; remove the lock file by hand if the pid is not a server',
-      { lock: this.lockPath, ...(holder === undefined ? {} : { holder_pid: holder }) },
+      `another server (pid ${holder}) kept the request slot lock ${this.lockPath} for more than ${(waitMs / 1000).toFixed(1)} s`,
+      'it may be running a long chunk: wait, then retry; if it persists, stop the other resolve-lua-bridge server (a second Claude Desktop entry, make smoke or a dev-register loop) or point RLB_STATE_DIR elsewhere; remove the lock file by hand if the pid is not a server',
+      { lock: this.lockPath, holder_pid: holder, waited_ms: waitMs },
     );
+  }
+
+  /** The lock as it is on disk right now: a live holder's pid, or none (a stale file counts as free). */
+  async inspectLock(): Promise<LockStatus> {
+    const out: LockStatus = { path: this.lockPath, owned: this.lockOwned };
+    if (this.lockOwned) return out;
+    const holder = await this.readLockPid();
+    if (holder !== undefined && holder !== this.pid && this.isPidAlive(holder)) out.holder_pid = holder;
+    return out;
   }
 
   /**
@@ -390,7 +437,17 @@ export class BridgeClient implements Bridge {
   }
 
   private async requestLocked(op: RequestOp, opts: RequestOptions): Promise<Envelope> {
-    await this.ensureLock();
+    const entry = this.now();
+    await this.ensureLock(opts.timeoutMs);
+    try {
+      return await this.exchange(op, opts, entry);
+    } finally {
+      this.releaseLockSync();
+    }
+  }
+
+  /** The request/response exchange proper; the caller holds the lock and releases it afterwards. */
+  private async exchange(op: RequestOp, opts: RequestOptions, entry: number): Promise<Envelope> {
     const prefs = await this.locatePrefs();
     const text = await this.readText(prefs.path);
     // Read fresh every time: a stale session id sent to a live bridge makes that bridge exit.
@@ -429,7 +486,7 @@ export class BridgeClient implements Bridge {
     this.log.debug('request written', { id, op, bytes: body.length });
 
     const started = this.now();
-    const deadline = started + opts.timeoutMs;
+    const deadline = entry + opts.timeoutMs; // the wait for the lock counts against the same budget
     let polls = 0;
     try {
       for (;;) {
@@ -468,7 +525,7 @@ export class BridgeClient implements Bridge {
         if (this.now() >= deadline) {
           throw new BridgeError(
             'timeout',
-            `the bridge did not answer request ${id} within ${(opts.timeoutMs / 1000).toFixed(1)} s`,
+            `the bridge did not answer request ${id} within ${((this.now() - started) / 1000).toFixed(1)} s`,
             `either the bridge is busy on a long synchronous call (wait, then retry), or its loop is gone (${START_INSTRUCTION})`,
             { id, op, timeout_ms: opts.timeoutMs },
           );
@@ -498,8 +555,7 @@ export class BridgeClient implements Bridge {
   async status(): Promise<BridgeStatus> {
     const out: BridgeStatus = { alive: false, lock: this.lock, state_dir: this.stateDir };
     try {
-      await this.ensureLock();
-      out.lock = this.lock;
+      out.lock = await this.inspectLock();
       const prefs = await this.locatePrefs();
       out.prefs_file = prefs.path;
       out.prefs_mtime = new Date(prefs.mtimeMs).toISOString();

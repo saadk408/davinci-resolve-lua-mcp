@@ -43,6 +43,9 @@ test('values are read, ~ expanded, trailing slashes dropped and empty strings tr
   assert.equal(expandHome('~', HOME), HOME);
   assert.equal(expandHome('~/x', HOME), '/Users/tester/x');
   assert.equal(expandHome('~x', HOME), '~x');
+  assert.equal(expandHome('${HOME}', HOME), HOME);
+  assert.equal(expandHome('${HOME}/.resolve-lua-bridge', HOME), '/Users/tester/.resolve-lua-bridge');
+  assert.equal(expandHome('${HOMEX}/y', HOME), '${HOMEX}/y');
 });
 
 test('bad values fall back and are recorded as problems', () => {
@@ -77,4 +80,17 @@ test('a state dir that cannot be stamped disables auto-install', () => {
   assert.equal(c.autoInstall, false);
   assert.equal(c.stateDir, '/tmp/a]==]b');
   assert.match(c.problems[0] ?? '', /cannot be installed/);
+});
+
+test('the literal ${HOME} defaults Claude Desktop 2.2553.1 passes through are expanded without a problem', () => {
+  const c = loadConfig(
+    {
+      RLB_STATE_DIR: '${HOME}/.resolve-lua-bridge',
+      RLB_SCRIPTS_DIR: '${HOME}/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Utility',
+    },
+    HOME,
+  );
+  assert.equal(c.stateDir, '/Users/tester/.resolve-lua-bridge');
+  assert.equal(c.scriptsDir, '/Users/tester/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Utility');
+  assert.deepEqual(c.problems, []);
 });

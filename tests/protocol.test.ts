@@ -78,7 +78,8 @@ test('status() reports alive with the ping result and the state-dir match', asyn
     assert.equal(s.session?.session, r.fake.session);
     assert.equal(s.pid_alive, true);
     assert.equal(s.state_dir_match, true);
-    assert.equal(s.lock.owned, true);
+    assert.equal(s.lock.owned, false, 'the lock is never held while idle');
+    assert.equal(s.lock.holder_pid, undefined);
     assert.equal((s.ping as { product: string }).product, 'DaVinci Resolve');
     assert.ok(typeof s.ping_ms === 'number');
   } finally {
@@ -239,15 +240,20 @@ test('the lock: a live holder blocks, a dead holder is taken over, and racing cl
   try {
     const lockPath = path.join(dirs.stateDir, LOCK_FILE);
     await fsp.writeFile(lockPath, `${process.pid}\n`); // "another server" that is alive (our own pid)
-    const blocked = new BridgeClient({ stateDir: dirs.stateDir, prefsDir: dirs.prefsDir, maxResponseKb: 64, pid: process.pid + 100000, isPidAlive: () => true });
+    const blocked = new BridgeClient({ stateDir: dirs.stateDir, prefsDir: dirs.prefsDir, maxResponseKb: 64, pid: process.pid + 100000, isPidAlive: () => true, pingTimeoutMs: 100 });
     assert.equal(await blocked.acquireLock(), false);
     assert.equal(blocked.lock.holder_pid, process.pid);
+    const t0 = Date.now();
     const err = await expectError(blocked.run('return 1', 50), 'lock_held');
+    assert.ok(Date.now() - t0 >= 45, 'a live holder is waited for up to the request timeout');
     assert.match(err.text, new RegExp(`pid ${process.pid}`));
     assert.match(err.text, /RLB_STATE_DIR/);
+    assert.equal(err.details['waited_ms'], 50);
     const s = await blocked.status();
-    assert.equal(s.reason, 'lock_held');
+    assert.equal(s.reason, 'prefs_missing', 'status looks at the prefs before it needs the lock');
     assert.equal(s.lock.path, lockPath);
+    assert.equal(s.lock.holder_pid, process.pid, 'status reports the live holder on disk');
+    assert.equal(await exists(lockPath), true, 'a live holder is never removed');
 
     await fsp.writeFile(lockPath, '2147483000\n'); // dead pid
     const taker = new BridgeClient({ stateDir: dirs.stateDir, prefsDir: dirs.prefsDir, maxResponseKb: 64 });
@@ -267,6 +273,38 @@ test('the lock: a live holder blocks, a dead holder is taken over, and racing cl
     for (const c of racers) c.releaseLockSync();
   } finally {
     await dirs.cleanup();
+  }
+});
+
+test('the lock is taken per request: a busy slot is waited for and the lock is gone after every request', async () => {
+  const r = await rig();
+  try {
+    const lockPath = path.join(r.dirs.stateDir, LOCK_FILE);
+    assert.equal(await exists(lockPath), false, 'idle: no lock');
+    const first = await r.client.run('return 1', 1000);
+    assert.equal(first.ok, true);
+    assert.equal(await exists(lockPath), false, 'released after the request');
+    // A live holder (our own pid) that releases after 60 ms: the request waits, then proceeds.
+    await fsp.writeFile(lockPath, `${process.pid + 100000}\n`);
+    const waiter = new BridgeClient({ stateDir: r.dirs.stateDir, prefsDir: r.dirs.prefsDir, maxResponseKb: 64, pollMs: 5, isPidAlive: () => true });
+    setTimeout(() => void fsp.unlink(lockPath), 60);
+    const t0 = Date.now();
+    const env = await waiter.run('return 2', 1000);
+    assert.equal(env.ok, true);
+    assert.ok(Date.now() - t0 >= 50, `waited for the holder (${Date.now() - t0} ms)`);
+    assert.equal(await exists(lockPath), false, 'released again');
+    assert.equal(r.fake.requests.length, 2);
+    // A holder that never releases: status() keeps the session but reports lock_held after the ping wait.
+    await fsp.writeFile(lockPath, `${process.pid + 100000}\n`);
+    const stuck = new BridgeClient({ stateDir: r.dirs.stateDir, prefsDir: r.dirs.prefsDir, maxResponseKb: 64, pollMs: 5, pingTimeoutMs: 60, isPidAlive: () => true });
+    const s = await stuck.status();
+    assert.equal(s.reason, 'lock_held');
+    assert.equal(s.lock.holder_pid, process.pid + 100000);
+    assert.equal(s.session?.session, r.fake.session, 'the session is still reported');
+    assert.equal(r.fake.requests.length, 2, 'no request was written while the slot was busy');
+    await fsp.unlink(lockPath);
+  } finally {
+    await r.close();
   }
 });
 

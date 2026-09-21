@@ -1,7 +1,7 @@
 # resolve-lua-bridge developer targets (docs/plan.md). Step 2 added the Lua targets, Step 3 the
 # Node targets (build, test-node, check-server, inspect), Step 4 the bundle and developer-loop targets
-# (bundle, install, sign, dev-register, dev-unregister, uninstall-bridge); Step 5 adds smoke/stop.
-# Node targets source nvm themselves.
+# (bundle, install, sign, dev-register, dev-unregister, uninstall-bridge), Step 5 the live targets
+# (smoke, stop). Node targets source nvm themselves.
 SHELL := /bin/zsh
 FUSCRIPT := /Applications/DaVinci Resolve/DaVinci Resolve.app/Contents/Libraries/Fusion/fuscript
 NVM := . $$HOME/.nvm/nvm.sh >/dev/null 2>&1
@@ -12,7 +12,7 @@ BUNDLE := dist/resolve-lua-bridge.mcpb
 SCRIPTS_DIR = $(if $(RLB_SCRIPTS_DIR),$(RLB_SCRIPTS_DIR),$(HOME)/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Utility)
 
 .PHONY: test test-lua test-node check-bridge check-server lint-lua gen-types typecheck build inspect clean \
-        bundle install sign dev-register dev-unregister uninstall-bridge
+        bundle install sign dev-register dev-unregister uninstall-bridge smoke stop
 
 test: test-lua test-node
 
@@ -99,6 +99,21 @@ uninstall-bridge:
 	  p="$(SCRIPTS_DIR)/$$f"; \
 	  if [ -f "$$p" ]; then rm -f "$$p" && echo "removed $$p"; else echo "not present: $$p"; fi; \
 	done
+
+## End-to-end smoke test against live Resolve with the bridge running (docs/plan.md Step 5): spawns the
+## built server/index.js over stdio, as Claude Desktop does, and drives the tools. It creates and deletes
+## a timeline named bridge-smoke and changes the project's render TargetDir/CustomName, so SMOKE_PROJECT
+## must name the open scratch project. The request-slot lock must be free: once the extension is
+## installed, disable it in Claude Desktop (or quit Claude Desktop) first. Log: .out/smoke.log, server
+## stderr: .out/smoke-server.log. Extra flags via SMOKE_FLAGS (--no-render, --timeout <s>).
+smoke: build
+	@mkdir -p "$(OUT)"
+	@set -o pipefail; $(NVM) && node scripts/smoke.mjs --project "$(SMOKE_PROJECT)" $(SMOKE_FLAGS) 2>&1 | tee "$(OUT)/smoke.log"
+
+## Ask the running bridge loop to exit (stop_bridge through the built server); relaunch it from
+## Workspace > Scripts afterwards.
+stop: build
+	@$(NVM) && node scripts/smoke.mjs --stop
 
 clean:
 	@rm -rf server dist "$(OUT)"

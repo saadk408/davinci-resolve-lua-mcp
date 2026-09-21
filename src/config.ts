@@ -48,9 +48,15 @@ export function defaultPrefsDir(home: string): string {
 }
 
 /** Expand a leading `~` or `~/`; anything else is returned unchanged. */
+/**
+ * `~`, `~/x`, `${HOME}` and `${HOME}/x` become absolute. The MCPB manifest spec lets a
+ * `user_config.default` use `${HOME}`, but Claude Desktop 2.2553.1 passed the default through
+ * literally (measured 2026-09-21), so the server expands it as well.
+ */
 export function expandHome(value: string, home: string): string {
-  if (value === '~') return home;
+  if (value === '~' || value === '${HOME}') return home;
   if (value.startsWith('~/')) return path.join(home, value.slice(2));
+  if (value.startsWith('${HOME}/')) return path.join(home, value.slice('${HOME}/'.length));
   return value;
 }
 

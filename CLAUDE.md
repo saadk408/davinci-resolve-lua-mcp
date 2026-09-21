@@ -45,6 +45,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   a git submodule (`upstream/`), imports `main` from it, and packs its own bundle under the same
   extension name (`docs/plan.md` Step 8 has the topology and the rules). Nothing from it belongs
   in this repository.
+- **Step 5 is done (2026-09-21).** `scripts/smoke.mjs` + `make smoke SMOKE_PROJECT=<name>` / `make stop`
+  (24 checks PASS against the live bridge in the scratch project "New Project 2"; measurements in
+  `docs/plan.md` Step 5 Result and `docs/plan-review-2026-09.md` § Q). The bundle is installed in
+  Claude Desktop as `local.mcpb.saad-khan.resolve-lua-bridge` and answered the user's project-overview
+  question through `get_project_info`, `list_timelines` and `list_media_pool_clips`. Two host findings
+  changed the server: the request-slot lock is now per request (an idle server never holds it) and the
+  config expands `${HOME}` (see "Working in this repo"). Not measured: the takeover (second click) and
+  the dirty-project `open_project` probe. Next is Step 6 (README), then Step 7, then Step 8 separately.
 - Git repository on `main`; `.gitignore` covers `.DS_Store`, `.remember/`, `.venv/`, `node_modules/`, `dist/`, `server/`, `*.mcpb`, `cert.pem`, `key.pem`, `.env`.
 
 ## Hard gates, in order
@@ -85,7 +93,7 @@ bridge/resolve_lua_bridge.lua (Scripts-menu Lua state, holds live `resolve`)
 
 Layout: `manifest.json` (MCPB v0.4, since Step 3), `package.json`, `tsconfig.json`, `.mcpbignore` (Step 4), `src/` (`index.ts`, `server.ts` with the 15 tools, `config.ts`, `protocol.ts`, `prefs.ts`, `lua.ts`, `docsSearch.ts`, `bridgeInstall.ts`, `log.ts`), `server/index.js` (esbuild output, git-ignored, shipped), `bridge/resolve_lua_bridge.lua` (one dependency-free file, under 600 lines), `scripts/` (`claude_diag.lua`, `gen-types.mjs`, `dev-register.mjs`, `smoke.mjs`), `tests/` (`*.test.ts` under `node --test` via `tsx`, `helpers/`, `check_server.sh`; `tests/lua/` under `fuscript`), `dist/` (packed bundle, git-ignored), `Makefile`, `README.md`. Developer-only, must be listed in `.mcpbignore`: `.luarc.json`, `types/`, `scripts/gen-types.mjs`, `tests/`, `Makefile`, `.out/`, `tsconfig.json`, `package-lock.json` (Lua LSP configuration, generated host-global definitions and the test tooling, see "Working in this repo").
 
-Runtime state: `RLB_STATE_DIR` (default `~/.resolve-lua-bridge/`, 0700) holding `next.lua`, `next.lua.tmp`, `lock` (pid, O_EXCL), `server.log`. No queue subdirectories, no heartbeat file, no stop file.
+Runtime state: `RLB_STATE_DIR` (default `~/.resolve-lua-bridge/`, 0700) holding `next.lua`, `next.lua.tmp`, `lock` (a pid file hard-linked into place, taken per request and absent while idle), `server.log`. No queue subdirectories, no heartbeat file, no stop file.
 
 ## Commands
 
@@ -108,12 +116,29 @@ Real targets (`Makefile`; the Node targets source nvm themselves):
 - `make dev-register` / `make dev-unregister`: `scripts/dev-register.mjs` merges (or removes) a `davinci-resolve-lua` entry in `~/Library/Application Support/Claude/claude_desktop_config.json` that runs `<repo>/server/index.js` with the current Node binary (`process.execPath`); backs the file up to `<file>.bak-<stamp>` first, keeps every other key, writes tmp + rename with mode 0600, refuses an unparsable file. Flags: `--config <path>`, `--name <key>`, `--env <path>` (`RLB_*` lines of a `KEY=VALUE` file become the entry's env; default `<repo>/.env`), `--dry-run`, `--remove`. It changes the user's Claude Desktop config: run it against the real file only when the user asks; the tests use temp files.
 - `make uninstall-bridge`: `rm -f` of exactly `resolve_lua_bridge.lua` and `claude_diag.lua` under `RLB_SCRIPTS_DIR` or the default user Utility folder, printing each path; touches nothing else.
 
-Planned targets (update this section once they are real):
-
-```sh
-make smoke         # against live Resolve + running bridge; only touches a timeline named bridge-smoke it creates
-make stop          # sends the stop request to the bridge
-```
+- `make smoke SMOKE_PROJECT="<open project>"` (Step 5): `make build`, then `scripts/smoke.mjs` spawns the built
+  `server/index.js` over stdio exactly as Claude Desktop does (`Client` + `StdioClientTransport` from
+  `@modelcontextprotocol/client`, a devDependency) and drives the real tools against the live bridge:
+  tools/list, `scripting_api_docs`, `resolve_status` (must be alive, `bridge_script.outcome` `up_to_date`,
+  the running loop's version equal to the repo's), latency (five `run_lua` round trips), prints and a
+  Lua error, `get_project_info`, `list_projects`, `list_timelines` (refuses if a `bridge-smoke` timeline
+  exists), then creates `bridge-smoke`, inserts a Solid Color generator (falls back to appending a
+  root-bin clip), `add_marker` at frames 1 and 0 and the occupied-frame refusal, `GetMarkers` read-back,
+  pagination of `get_timeline_items` and `list_media_pool_clips`, a 200 KB `run_lua` truncation,
+  `delete_markers` refusal and deletion, `render_current_timeline` + `get_render_status` polling from the
+  current page (measures whether the Deliver page is needed), then deletes the timeline, the render job
+  and its temp dir and restores the previous timeline and page. Output: one `PASS|FAIL|SKIP|INFO` line
+  per check and `SMOKE_RESULT: PASS|FAIL`; log in `.out/smoke.log`, the server's stderr in
+  `.out/smoke-server.log`. `SMOKE_PROJECT` must equal the open project's name because the render check
+  sets the project's render TargetDir/CustomName, which the API cannot read back; without it the run
+  stops after `resolve_status` and prints the open project's name. `SMOKE_FLAGS=--no-render` skips the
+  render; `--timeout <s>` is the `run_lua` wait. The request-slot lock is taken per request, so the
+  script and the installed extension share the bridge; a `lock_held` answer names the pid (and command)
+  that kept the slot busy longer than the wait, which means a long chunk elsewhere or a stale lock whose
+  pid is alive. On a machine where the server never ran, the first `make smoke` performs the
+  self-install and stops with `never_started` and the start instruction.
+- `make stop`: `scripts/smoke.mjs --stop` calls `stop_bridge` through the built server; the bridge must
+  be relaunched from `Workspace > Scripts` afterwards.
 
 ## Project-specific rules
 
@@ -188,3 +213,6 @@ When and how to use them:
 - Extension points (Step 4, for the private build of Step 8; no-ops by default): `main(options)` in `src/main.ts` takes `wrapServer` (applied inside the `serveStdio` factory right after `createServer`; it must return that `McpServer` or a Proxy over it, because `serveStdio` checks `instanceof McpServer` and takes `.server` from it), `onToolFailure` (forwarded to `ServerDeps`; `guard(tool, fn)` in `server.ts` calls it wherever a thrown `BridgeError` becomes an `isError` result, never on success, never for Lua-side failures, never from `resolve_status`; a throw inside it is logged and ignored) and `beforeExit` (awaited on every exit path, the clean shutdown and both crash handlers, behind a ref'd 2 s timer; ref'd on purpose, because after the transport closes an unref'd timer would let Node exit before `exit(code)` runs). `options.runtime` (`env`, `proc`, `transport`, `beforeExitCapMs`) is a test seam only: `tests/main.test.ts` drives `main()` in-process with a fake `EventEmitter` process and the server half of `InMemoryTransport.createLinkedPair()` (`serveStdio` accepts any `Transport`, starts it itself and calls the factory once per connection). Every process listener goes through `runtime.proc`; never register on the real `process` in a test (a `node --test` child's stdin ends at once and would arm a real `process.exit`).
 - `mcpb pack` (2.1.2) walks the directory with the `ignore` package (gitignore syntax) after its built-in excludes (`.git`, `.DS_Store`, `*.log`, `*.map`, `.env*`, `package-lock.json`, `tsconfig.json`, `*.d.ts`, `*.mcpb`) which do **not** cover `node_modules`, `.claude`, `.remember` or `.out`; `.mcpbignore` lists them without trailing slashes (`src/` would not match the directory entry itself and the walker would descend into it). The manifest schema is strict but allows `$schema`. `mcpb pack` needs neither `README.md` nor an icon.
 - Any script or test that must spawn a process (the bundle probe in `tests/check_bundle.sh`, `tests/devRegister.test.ts`) is fine: the no-spawn rule and the `child_process` grep cover `src/` only. macOS shell facts used there: `zipinfo -1` for a bare file list, `stat -f %z` for a size, `/usr/bin/unzip` and `/usr/bin/open` exist.
+- `StdioClientTransport` (`@modelcontextprotocol/client/stdio`) does not inherit the environment: the child gets `getDefaultEnvironment()` (`HOME LOGNAME PATH SHELL TERM USER` on macOS) merged with the `env` option, so a script that spawns the server must pass every `RLB_*` variable explicitly (`scripts/smoke.mjs` does). `Client.callTool` returns `structuredContent` for `isError` results too, validates successful results against the tool's `outputSchema` (a mismatch throws instead of returning), and its `RequestOptions.timeout` defaults to 60 s, the same as the server's render wait, so pass an explicit timeout per call. `close()` ends the child's stdin, then SIGTERM after 2 s, then SIGKILL; both server exit paths release the lock.
+- **The request-slot lock is per request, never held while idle** (changed in Step 5). Measured 2026-09-21 with Claude Desktop 2.2553.1: on install it launched the server six times in about a second (three launch sequences, each an "era probe" sibling process that answers `server/discover` plus the real server, all in Electron utility processes with stdin on `/dev/null` and MCP fed over an internal channel, so the stdin-closed exit path never fires there). The last sequence's probe sibling stays alive and idle for the whole session; with the Step 3 startup lock it owned `~/.resolve-lua-bridge/lock` for ever and the connected server answered `lock_held` to everything. Now `BridgeClient.request()` takes the lock, waits up to the request's own timeout for a live holder, releases it in `finally`, and `status()` reports the live holder on disk without needing the lock; `main.ts` takes it only for a moment at startup to remove a leftover `next.lua`. Consequences: an idle server never has a lock file (`tests/check_bundle.sh` and `scripts/smoke.mjs` assert it), `make smoke`/`make stop` work alongside the installed extension, and `lock_held` now means a request elsewhere outlasted the wait.
+- Claude Desktop 2.2553.1 passes a `user_config.default` such as `${HOME}/.resolve-lua-bridge` to the server **literally** (the MCPB reference says defaults support `${HOME}`; measured 2026-09-21 in `server.log`: `RLB_STATE_DIR="${HOME}/.resolve-lua-bridge" is not an absolute path`). `expandHome()` in `src/config.ts` therefore expands a leading `${HOME}` as well as `~`, so the manifest defaults keep their readable form and `resolve_status` reports no config problem. Claude Desktop also copies the server's stderr into `~/Library/Logs/Claude/main.log` as `[UtilityProcess stderr]` lines and into `mcp-server-DaVinci Resolve (Lua bridge).log`, which also lists every `tools/call`.
