@@ -112,6 +112,10 @@ export const LOCK_FILE = 'lock';
 export const FORCED_READ_EVERY = 20;
 /** How often a request re-tries a lock held by another live server (ms). */
 const LOCK_POLL_MS = 50;
+/** A dead holder's lock is taken over under this exclusive marker file next to the lock. */
+export const LOCK_TAKEOVER_FILE = 'lock.takeover';
+/** A takeover marker older than this belongs to a process that died inside its takeover; it is removed. */
+const LOCK_TAKEOVER_STALE_MS = 30_000;
 
 export function defaultIsPidAlive(pid: number): boolean {
   try {
@@ -187,9 +191,9 @@ export class BridgeClient implements Bridge {
    * Take `<stateDir>/lock` (a hard link of a pid file, so it always holds our pid) for one request. The lock is held
    * only while a request is in flight, never while idle: Claude Desktop keeps an idle "era probe"
    * sibling of the server alive for the whole session, so a lock taken at startup would sit with
-   * that sibling for ever (measured 2026-09-21). A dead holder is taken over by renaming the stale
-   * file away first, so two servers racing on the same dead lock cannot both win; a live holder is
-   * waited for up to `waitMs`. Returns true when we own the lock.
+   * that sibling for ever (measured 2026-09-21). A dead holder is taken over under an exclusive
+   * marker file (`takeOverDeadLock`), so two servers racing on the same dead lock cannot both win;
+   * a live holder is waited for up to `waitMs`. Returns true when we own the lock.
    */
   async acquireLock(waitMs = 0): Promise<boolean> {
     const deadline = this.now() + waitMs;
@@ -247,26 +251,97 @@ export class BridgeClient implements Bridge {
           this.lockHolder = holder;
           return 'held';
         }
-        // Dead (or unreadable) holder: exactly one process wins the rename.
-        const stale = `${this.lockPath}.stale.${this.pid}`;
-        try {
-          await fsp.rename(this.lockPath, stale);
-          await fsp.unlink(stale).catch(() => undefined);
-          this.log.info('lock: took over a stale lock', { holder });
-        } catch (err) {
-          if (errnoCode(err) !== 'ENOENT') {
-            this.log.warn('lock: cannot take over', err);
-            this.lockOwned = false;
-            this.lockProblem = (err as Error).message;
-            return 'error';
-          }
+        // Dead (or unreadable) holder. The verdict and the removal must not be separate steps: a
+        // racer that judged the holder dead and then renamed the lock away could remove a lock that
+        // another racer had taken in between (seen on CI 2026-09-21: four racers, two owners).
+        const took = await this.takeOverDeadLock(pidFile);
+        if (took === 'owned') {
+          this.lockOwned = true;
+          this.lockHolder = undefined;
+          this.lockProblem = undefined;
+          return 'owned';
         }
+        if (took !== 'retry') return took;
       }
       this.lockOwned = false;
       this.lockProblem = 'the lock file kept changing under us';
       return 'error';
     } finally {
       await fsp.unlink(pidFile).catch(() => undefined);
+    }
+  }
+
+  /**
+   * Take over a lock whose holder is dead, one process at a time. `open(wx)` of the marker file is
+   * the mutual exclusion; the holder is re-read under it, and that read is the verdict that counts;
+   * the dead lock is then replaced by renaming our pid file over it, which never leaves the slot
+   * empty for a fresh `link` to slip into. While the marker exists the lock cannot change identity:
+   * a fresh `link` fails on the existing file, a release needs a live owner, and other takeovers
+   * wait ('held', so the caller polls). A marker older than LOCK_TAKEOVER_STALE_MS belongs to a
+   * process that died inside its takeover and is removed. 'retry' means the lock vanished or an
+   * abandoned marker was removed: `tryLock` starts over with a plain link.
+   */
+  private async takeOverDeadLock(pidFile: string): Promise<'owned' | 'held' | 'retry' | 'error'> {
+    const marker = path.join(path.dirname(this.lockPath), LOCK_TAKEOVER_FILE);
+    let fh: fsp.FileHandle;
+    try {
+      fh = await fsp.open(marker, 'wx');
+    } catch (err) {
+      if (errnoCode(err) !== 'EEXIST') {
+        this.log.warn('lock: cannot create the takeover marker', err);
+        this.lockOwned = false;
+        this.lockProblem = (err as Error).message;
+        return 'error';
+      }
+      let ageMs: number;
+      try {
+        ageMs = Date.now() - (await fsp.stat(marker)).mtimeMs;
+      } catch (statErr) {
+        if (errnoCode(statErr) === 'ENOENT') return 'retry'; // that takeover just finished
+        this.log.warn('lock: cannot stat the takeover marker', statErr);
+        this.lockOwned = false;
+        this.lockProblem = (statErr as Error).message;
+        return 'error';
+      }
+      if (ageMs <= LOCK_TAKEOVER_STALE_MS) {
+        this.lockOwned = false;
+        this.lockHolder = undefined;
+        this.lockProblem = `another server is taking over a stale lock (${marker})`;
+        return 'held';
+      }
+      await fsp.unlink(marker).catch(() => undefined);
+      this.log.warn('lock: removed an abandoned takeover marker', { marker, age_ms: Math.round(ageMs) });
+      return 'retry';
+    }
+    try {
+      try {
+        await fh.writeFile(`${this.pid}\n`);
+      } finally {
+        await fh.close();
+      }
+      const holder = await this.readLockPid();
+      if (holder === this.pid) return 'owned';
+      if (holder !== undefined && this.isPidAlive(holder)) {
+        this.lockOwned = false;
+        this.lockHolder = holder;
+        return 'held';
+      }
+      try {
+        await fsp.stat(this.lockPath);
+      } catch (err) {
+        if (errnoCode(err) === 'ENOENT') return 'retry'; // released meanwhile: a plain link will do
+        throw err;
+      }
+      await fsp.rename(pidFile, this.lockPath);
+      this.log.info('lock: took over a dead lock', { holder });
+      return 'owned';
+    } catch (err) {
+      this.log.warn('lock: cannot take over', err);
+      this.lockOwned = false;
+      this.lockProblem = (err as Error).message;
+      return 'error';
+    } finally {
+      await fsp.unlink(marker).catch(() => undefined);
     }
   }
 

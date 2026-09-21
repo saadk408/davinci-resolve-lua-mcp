@@ -99,8 +99,9 @@ bridge/resolve_mcp_bridge.lua (Scripts-menu Lua state, holds live `resolve`)
   consecutive failed runs where `GetVersionString` also fails, the loop exits (status `no_reply`,
   `pid_alive` true).
 - Runtime state: `RLB_STATE_DIR` (default `~/.davinci-resolve-lua-mcp`, 0700) holds `next.lua`,
-  `next.lua.tmp`, `lock` (a pid file hard-linked into place, taken per request, absent while idle)
-  and `server.log`. No queue directories, no heartbeat file, no stop file.
+  `next.lua.tmp`, `lock` (a pid file hard-linked into place, taken per request, absent while idle),
+  `lock.takeover` (exists only during the takeover of a dead holder's lock; one older than 30 s is
+  abandoned and removed) and `server.log`. No queue directories, no heartbeat file, no stop file.
 - Layout: `src/` (ten modules; `main.ts` is the wiring, `server.ts` the tools, `lua.ts` the snippets,
   `protocol.ts` the slot and lock, `prefs.ts` the reader, `bridgeInstall.ts` the self-install),
   `server/index.js` (built, git-ignored, shipped), `bridge/resolve_mcp_bridge.lua`, `scripts/`

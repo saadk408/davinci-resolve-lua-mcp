@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
-import { BridgeClient, BridgeError, LOCK_FILE, REQUEST_FILE } from '../src/protocol.js';
+import { BridgeClient, BridgeError, LOCK_FILE, LOCK_TAKEOVER_FILE, REQUEST_FILE } from '../src/protocol.js';
 import { hex, startFakeBridge, type FakeBridge, type FakeBridgeOptions } from './helpers/fakeBridge.js';
 import { exists, makeTempDirs, sleep, waitFor, type TempDirs } from './helpers/tmp.js';
 
@@ -263,14 +263,39 @@ test('the lock: a live holder blocks, a dead holder is taken over, and racing cl
     assert.equal(await exists(lockPath), false);
 
     await fsp.writeFile(lockPath, '2147483000\n');
-    const racers = [1, 2, 3, 4].map((i) => new BridgeClient({ stateDir: dirs.stateDir, prefsDir: dirs.prefsDir, maxResponseKb: 64, pid: 900000 + i, isPidAlive: (p) => p >= 900000 && p < 1000000 }));
+    const racers = [1, 2, 3, 4, 5, 6, 7, 8].map((i) => new BridgeClient({ stateDir: dirs.stateDir, prefsDir: dirs.prefsDir, maxResponseKb: 64, pid: 900000 + i, isPidAlive: (p) => p >= 900000 && p < 1000000 }));
     const results = await Promise.all(racers.map((c) => c.acquireLock()));
     assert.equal(results.filter(Boolean).length, 1, `exactly one owner: ${JSON.stringify(results)}`);
     const owner = racers[results.indexOf(true)];
     assert.ok(owner);
     assert.equal(Number((await fsp.readFile(lockPath, 'utf8')).trim()), 900000 + results.indexOf(true) + 1);
-    assert.equal(await exists(`${lockPath}.stale.900001`), false, 'stale files are cleaned up');
+    assert.equal(await exists(path.join(dirs.stateDir, LOCK_TAKEOVER_FILE)), false, 'the takeover marker is cleaned up');
     for (const c of racers) c.releaseLockSync();
+  } finally {
+    await dirs.cleanup();
+  }
+});
+
+test('the lock: a takeover in progress is waited for, an abandoned takeover marker is removed', async () => {
+  const dirs = await makeTempDirs();
+  try {
+    const lockPath = path.join(dirs.stateDir, LOCK_FILE);
+    const marker = path.join(dirs.stateDir, LOCK_TAKEOVER_FILE);
+    await fsp.writeFile(lockPath, '2147483000\n'); // dead holder
+    await fsp.writeFile(marker, '4242\n'); // another server is inside its takeover right now
+    const c = new BridgeClient({ stateDir: dirs.stateDir, prefsDir: dirs.prefsDir, maxResponseKb: 64 });
+    assert.equal(await c.acquireLock(), false, 'a fresh marker means a takeover is in progress');
+    assert.equal(await exists(marker), true, 'a fresh marker is left alone');
+    assert.equal((await fsp.readFile(lockPath, 'utf8')).trim(), '2147483000', 'and so is the lock');
+    const long = await expectError(c.run('return 1', 30), 'lock_held');
+    assert.match(long.text, /taking over a stale lock/);
+    const old = new Date(Date.now() - 60_000);
+    await fsp.utimes(marker, old, old); // the taker died a minute ago
+    assert.equal(await c.acquireLock(), true, 'an abandoned marker is removed and the dead lock taken over');
+    assert.equal((await fsp.readFile(lockPath, 'utf8')).trim(), String(process.pid));
+    assert.equal(await exists(marker), false);
+    c.releaseLockSync();
+    assert.equal(await exists(lockPath), false);
   } finally {
     await dirs.cleanup();
   }
