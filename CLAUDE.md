@@ -16,8 +16,10 @@ its own Node. Version 0.1.0 is the first public release.
 
 `README.md` is the user documentation (install, start and stop, the 15-tool table with the `run_lua`
 guide, the settings and `RLB_*` variables, troubleshooting, security, uninstall, the make targets);
-do not repeat it here. `SECURITY.md` is the reporting policy. The planning documents were removed
-before release, so this file and the code comments are the design record.
+do not repeat it here. `SECURITY.md` is the reporting policy; `PRIVACY.md` is the privacy policy the
+extension directory requires (linked by the manifest's `privacy_policies` and the README's Privacy
+Policy section; neither ships in the bundle). The planning documents were removed before release,
+so this file and the code comments are the design record.
 
 ## Rules
 
@@ -108,7 +110,7 @@ bridge/resolve_mcp_bridge.lua (Scripts-menu Lua state, holds live `resolve`)
   (`claude_diag.lua` ships; `gen-types.mjs`, `dev-register.mjs`, `smoke.mjs`, `release-notes.sh` are
   developer-only), `types/resolve_host.d.lua` + `.luarc.json` (Lua LSP), `tests/`, `docs/images/`
   (README screenshots; the MP4 recordings are git-ignored, GitHub-hosted), `.github/workflows/`
-  (`tests.yml`, `release.yml`), `SECURITY.md`.
+  (`tests.yml`, `release.yml`), `SECURITY.md`, `PRIVACY.md`.
   `tsconfig.json` covers `src/` and `tests/` only. The bundle is exactly the eight files allowlisted
   in `tests/check_bundle.sh`; anything new goes into `.mcpbignore` (directories without trailing
   slashes: `mcpb pack` walks with the `ignore` package after built-in excludes that do not cover

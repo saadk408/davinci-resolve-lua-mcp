@@ -186,6 +186,16 @@ The settings map onto the first four variables; the rest have no setting. A bad 
 - `run_lua` executes whatever Lua Claude writes. `delete_markers` asks for `confirm`; `run_lua` takes no confirmation, is the general escape hatch, and is marked destructive for that reason.
 - No network: the server opens no sockets and makes no requests. Files in, preferences out.
 
+## Privacy Policy
+
+The extension runs entirely on your Mac and sends nothing anywhere. The full policy is [PRIVACY.md](https://github.com/saadk408/davinci-resolve-lua-mcp/blob/main/PRIVACY.md); in short:
+
+- **Collection.** It processes what Claude sends it (Lua code, marker text, names, paths) and what Resolve answers (project, timeline, clip and marker metadata, media paths). No accounts, no credentials, no telemetry, analytics or crash reporting.
+- **Use and storage.** That data lives only in the request file (one call, then deleted), the last answer in `Fusion.prefs`, the server log (ids, timings, paths and error messages; never Lua code, arguments or results) and Claude Desktop's copy of that log.
+- **Third-party sharing.** None by the extension. Claude Desktop sends tool inputs and results to Anthropic as part of your conversation, under Anthropic's privacy policy; GitHub serves the download.
+- **Retention.** Until the next call or bridge launch overwrites the answer, until the log passes 5 MB, and otherwise until you delete the files as described under [Uninstall](#uninstall).
+- **Contact.** Questions: [open an issue](https://github.com/saadk408/davinci-resolve-lua-mcp/issues). Security problems: the repository's Security tab, as [SECURITY.md](https://github.com/saadk408/davinci-resolve-lua-mcp/blob/main/SECURITY.md) describes.
+
 ## Uninstall
 
 1. Remove "DaVinci Resolve Lua MCP" under Settings > Extensions in Claude Desktop.

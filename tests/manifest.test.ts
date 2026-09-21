@@ -1,5 +1,6 @@
-// manifest.json (MCPB v0.4) must advertise exactly the tools the server registers, and the three
-// version strings (package.json, manifest.json, the server) must agree.
+// manifest.json (MCPB v0.4) must advertise exactly the tools the server registers, the three
+// version strings (package.json, manifest.json, the server) must agree, and privacy_policies must
+// name at least one https URL (the extension directory rejects a local extension without one).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fsp from 'node:fs/promises';
@@ -23,6 +24,7 @@ interface Manifest {
   compatibility: { platforms: string[]; runtimes: { node: string } };
   tools: Array<{ name: string; description: string }>;
   tools_generated: boolean;
+  privacy_policies: string[];
 }
 
 test('manifest.json tools equal tools/list and the versions agree', async () => {
@@ -49,6 +51,8 @@ test('manifest.json tools equal tools/list and the versions agree', async () => 
   assert.deepEqual(manifest.compatibility.platforms, ['darwin']);
   assert.equal(manifest.compatibility.runtimes.node, '>=20.0.0');
   assert.equal(manifest.tools_generated, false);
+  assert.ok(Array.isArray(manifest.privacy_policies) && manifest.privacy_policies.length > 0, 'privacy_policies lists at least one URL');
+  for (const url of manifest.privacy_policies) assert.match(url, /^https:\/\//, 'privacy policy URLs are https');
 
   const dirs = await makeTempDirs();
   try {

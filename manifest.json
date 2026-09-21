@@ -91,5 +91,5 @@
     { "name": "scripting_api_docs", "description": "Search Blackmagic's shipped Resolve scripting reference (.pyi signatures, README sections, CHANGELOG) with file and line; flags deprecated and unsupported calls." }
   ],
   "tools_generated": false,
-  "privacy_policies": []
+  "privacy_policies": ["https://github.com/saadk408/davinci-resolve-lua-mcp/blob/main/PRIVACY.md"]
 }
