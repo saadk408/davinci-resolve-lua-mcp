@@ -250,8 +250,11 @@ The developer loop: `make dev-register` once, then `make build` and restart Clau
 
 Layout: `bridge/resolve_mcp_bridge.lua` is the in-Resolve loop (one dependency-free file, under 600 lines); `src/` is the TypeScript server (`server.ts` holds the 15 tools, `lua.ts` every Lua snippet and the one string-escaping helper, `protocol.ts` the request slot and lock, `prefs.ts` the `Fusion.prefs` reader, `bridgeInstall.ts` the self-install); `scripts/claude_diag.lua` is the Step 1 viability diagnostic that also ships in the bundle; `tests/` holds the Node suite and `tests/lua/` the `fuscript` checks; `docs/` holds the plan, the research, the diagnostic record and the review notes.
 
-## Prior art
+## Acknowledgments
 
-[AutoSubs](https://github.com/tmoroney/auto-subs) is the only project found running a Scripts-menu Lua loop on free 21.1 in production, answering through Fusion preferences; its measurements and its shutdown lesson shaped this design (3.4, 3.5, 6.5). [samuelgursky/davinci-resolve-mcp](https://github.com/samuelgursky/davinci-resolve-mcp) drives Resolve through the Python scripting API (Studio, or free 21.0.x through a Python menu script), and its README and issue tracker record that free 21.1 no longer lists `.py` scripts while a Lua file in the same folder lists normally, which is the door this project uses (6.2, 3.2). Blackmagic's native server for Studio 21.1 ships as its own `.mcpb` (6.3).
+This project builds on the work of:
+
+- [AutoSubs](https://github.com/tmoroney/auto-subs) - Lua bridge over Fusion preferences on free 21.1, the channel this project adopted
+- [samuelgursky/davinci-resolve-mcp](https://github.com/samuelgursky/davinci-resolve-mcp) - MCP server for DaVinci Resolve Studio through the Python scripting API
 
 DaVinci Resolve is a trademark of Blackmagic Design Pty Ltd. This project is not affiliated with or endorsed by Blackmagic Design.

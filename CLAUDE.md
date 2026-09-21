@@ -62,12 +62,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   Rationale, trademark note and the migration record are in `docs/plan-review-2026-09.md` § R. Reinstalled and
   smoke-tested (24 PASS) under the new name the same day. `docs/diagnostic-2026-09.md`,
   `docs/research-2026-09.md` and plan-review §§ A-Q predate the rename and keep the old names on purpose.
-- **Step 6 is done (2026-09-21).** `README.md` (257 lines, written with the repository's `create-readme`
+- **Step 6 is done (2026-09-21).** `README.md` (260 lines, written with the repository's `create-readme`
   skill): tagline and why with research-row citations, features, requirements, install, start and stop,
   example prompts, the 15-tool table with a `run_lua` guide, the four settings and the eight `RLB_*`
   variables, "How it works" (the diagram plus nine design choices, each with its rows or measurement),
   13 troubleshooting entries, security, uninstall, development (`make` targets, the dev-register loop, the
-  smoke caveat), prior art and the § R trademark line. It ships in the bundle: `make bundle` now packs 7
+  smoke caveat), a short acknowledgments list and the § R trademark line. It ships in the bundle: `make bundle` now packs 7
   files (216 KB packed, 975 KB unpacked; `tests/check_bundle.sh` has listed `README.md` and `LICENSE` as
   optional since Step 4). Same-day follow-up: `LICENSE` (standard MIT text, 2026, Saad Khan) added and shipped
   in the bundle; three screenshots under `docs/images/` (hero, Scripts menu, extension settings; `.mcpbignore`
