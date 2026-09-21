@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// smoke.mjs: the end-to-end smoke test of docs/plan.md Step 5. It spawns the BUILT server
+// smoke.mjs: the end-to-end smoke test. It spawns the BUILT server
 // (server/index.js) over stdio exactly as Claude Desktop does, connects with the MCP client and
 // drives the tools against the live bridge running inside DaVinci Resolve. It creates and deletes a
 // timeline named bridge-smoke, puts a generator or a root-bin clip on it, adds and deletes markers

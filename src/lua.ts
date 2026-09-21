@@ -2,8 +2,8 @@
 // file template, and the Lua snippet behind each purpose-built tool. Tool inputs are untrusted
 // even though Claude sends them, so every embedded value passes through luaString()/luaInt().
 //
-// API calls below are the signatures in DaVinciResolveScript.pyi (quoted in
-// docs/plan-review-2026-09.md § L); lists are iterated with `for i = 1, #list`, dicts are read by
+// API calls below use the signatures in DaVinciResolveScript.pyi, Blackmagic's shipped
+// reference; lists are iterated with `for i = 1, #list`, dicts are read by
 // key, every boolean the API returns is checked, and expected failures are returned as
 // `{ ok = false, error = "..." }` so the server can turn them into an isError result.
 

@@ -5,7 +5,7 @@
 -- the LSP can type-check bridge code instead of flagging every host call as an
 -- undefined global. Sources:
 --   * `bmd`: the 28 keys measured in the free 21.1 menu host on this Mac on
---     2026-09-20 (docs/diagnostic-2026-09.md "bmd keys"). Signatures are given
+--     2026-09-20. Signatures are given
 --     only where Step 1 measured them; the rest are `fun(...): any`.
 --   * The block between BEGIN GENERATED and END GENERATED is written by
 --     `scripts/gen-types.mjs` (`make gen-types`) from Blackmagic's
@@ -3281,11 +3281,11 @@ function fusion:NewComp(...) end
 ---@return any
 function fusion:LoadComp(path, ...) end
 
----@deprecated Never call from the bridge: it takes Fusion's shared script executor for the whole session (docs/plan.md safety rules).
+---@deprecated Never call from the bridge: it takes Fusion's shared script executor for the whole session (project safety rule).
 ---@param script string
 function fusion:Execute(script) end
 
----@deprecated Never call from the bridge: same executor as Execute (docs/plan.md safety rules).
+---@deprecated Never call from the bridge: same executor as Execute (project safety rule).
 ---@param script string
 function fusion:RunScript(script, ...) end
 

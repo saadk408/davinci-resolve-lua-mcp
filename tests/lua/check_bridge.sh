@@ -1,5 +1,5 @@
 #!/bin/sh
-# Grep gates for bridge/resolve_mcp_bridge.lua (docs/plan.md Step 2 acceptance). Full-line
+# Grep gates for bridge/resolve_mcp_bridge.lua. Full-line
 # comments are stripped before the forbidden-call checks (a header comment once tripped the
 # os.exit check). The forbidden-call pattern is self-tested against a sample so a regex edit
 # cannot silently stop matching. Run: sh tests/lua/check_bridge.sh [path]

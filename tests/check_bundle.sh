@@ -1,5 +1,5 @@
 #!/bin/sh
-# Gate for the packed bundle (docs/plan.md Step 4): the archive holds exactly the shipped files,
+# Gate for the packed bundle: the archive holds exactly the shipped files,
 # stays under 2 MB, and the unpacked copy answers tools/list with the 15 tools over stdio (under a
 # temp state dir, with the self-install off, so nothing outside the temp dir is touched).
 # Run: sh tests/check_bundle.sh dist/davinci-resolve-lua-mcp.mcpb

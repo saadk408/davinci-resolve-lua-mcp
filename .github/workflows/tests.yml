@@ -1,0 +1,30 @@
+# The Node-side gates on a macOS runner: the src/ grep gates, tsc, the node --test suite, then
+# `make bundle` (mcpb validate + pack + tests/check_bundle.sh). The Lua tests (`make test-lua`)
+# need fuscript from a DaVinci Resolve installation and the smoke test needs a live bridge, so
+# neither runs here: run `make test` on a Mac with Resolve before a release.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  node:
+    name: node ${{ matrix.node }}
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        node: [20, 24]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: make test-node
+      - run: make bundle

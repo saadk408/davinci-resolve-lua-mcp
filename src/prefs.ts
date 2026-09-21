@@ -1,6 +1,6 @@
 // Fusion.prefs: locating the newest profile file and parsing the bridge's two keys out of it.
 // The file is a Lua table Fusion writes in hash order with tab indentation; string values escape
-// only `\"`, `\\` and `\n` (measured, docs/diagnostic-2026-09.md). Our two values are
+// only `\"`, `\\` and `\n` (measured on Resolve 21.1). Our two values are
 // `<id>:<hex>` and `<hex>`, so a word-boundary regex with a closing quote is exact.
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';

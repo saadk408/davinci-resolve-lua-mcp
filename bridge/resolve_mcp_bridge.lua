@@ -1,10 +1,10 @@
 -- resolve_mcp_bridge v0.1.0
 -- RLB_STATE_DIR=@@RLB_STATE_DIR@@
--- The in-Resolve half of davinci-resolve-lua-mcp (docs/plan.md, protocol v1). Launched from
+-- The in-Resolve half of davinci-resolve-lua-mcp (protocol v1). Launched from
 -- Workspace > Scripts, it polls <state_dir>/next.lua, runs the chunk a request carries, and answers
 -- through Fusion prefs (Global.ResolveLuaBridge.RLBResp = "<id>:<hex json>", one SavePrefs per
 -- request; RLBSession once at start and on stop). The host facts it relies on are measured, not
--- documented (docs/diagnostic-2026-09.md). It never exits the process, never deletes a file, never
+-- documented by Blackmagic. It never exits the process, never deletes a file, never
 -- touches prefs while idle, and has no dependencies. Loaded with the chunk argument
 -- "RLB_BRIDGE_TESTING" (tests/lua, under fuscript) it returns its internals instead of looping.
 
@@ -67,7 +67,7 @@ local function call_string(obj, method)
   return nil
 end
 
--- Encoders: hex and JSON (rules in docs/plan.md Step 2) ---------------------------------------
+-- Encoders: hex and JSON ----------------------------------------------------------------------
 
 local HEX = {}
 for i = 0, 255 do HEX[string.char(i)] = string.format("%02x", i) end

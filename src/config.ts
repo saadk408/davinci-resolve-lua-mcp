@@ -1,5 +1,5 @@
 // RLB_* environment parsing. Never throws: every bad value falls back to its default and is
-// recorded in `problems`, which resolve_status reports (docs/plan.md, Step 3 "Defensive behaviour").
+// recorded in `problems`, which resolve_status reports.
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { isLogLevel, type LogLevel } from './log.js';

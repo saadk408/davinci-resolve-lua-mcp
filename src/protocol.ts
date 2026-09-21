@@ -1,4 +1,4 @@
-// The server side of protocol v1 (docs/plan.md "Protocol v1"): the single-instance lock, the
+// The server side of protocol v1: the single-instance lock, the
 // in-process mutex, the request slot `next.lua`, the prefs poller and the liveness checks.
 import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';

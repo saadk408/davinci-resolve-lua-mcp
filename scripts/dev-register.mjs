@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// dev-register.mjs: the developer loop (docs/plan.md Step 4). Merges one entry into Claude
+// dev-register.mjs: the developer loop. Merges one entry into Claude
 // Desktop's claude_desktop_config.json that runs this checkout's server/index.js with the current
 // Node binary, so a code change needs `make build` and a Claude Desktop restart instead of a
 // repack. Backs the file up first, keeps every other key, keeps mode 0600 and never overwrites a

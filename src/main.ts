@@ -1,5 +1,5 @@
 // main(options): the server's wiring, factored out of index.ts so a private instrumented build can
-// import it and add hooks (docs/plan.md Step 4): config, logging, the lock, the stdio transport,
+// import it and add hooks: config, logging, the lock, the stdio transport,
 // then the self-install check. stdout is the MCP transport: nothing here writes to it.
 //
 // Hooks, all optional and no-ops by default:

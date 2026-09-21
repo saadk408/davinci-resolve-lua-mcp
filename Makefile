@@ -1,10 +1,11 @@
-# davinci-resolve-lua-mcp developer targets (docs/plan.md). Step 2 added the Lua targets, Step 3 the
-# Node targets (build, test-node, check-server, inspect), Step 4 the bundle and developer-loop targets
-# (bundle, install, sign, dev-register, dev-unregister, uninstall-bridge), Step 5 the live targets
-# (smoke, stop). Node targets source nvm themselves.
+# davinci-resolve-lua-mcp developer targets: the Lua targets (test-lua, check-bridge, lint-lua,
+# gen-types), the Node targets (build, test-node, check-server, typecheck, inspect), the bundle and
+# developer-loop targets (bundle, install, sign, dev-register, dev-unregister, uninstall-bridge) and
+# the live targets (smoke, stop). Node targets source nvm when it is installed and CI is not set;
+# under CI (GitHub sets CI=true) they use the Node already on PATH.
 SHELL := /bin/zsh
 FUSCRIPT := /Applications/DaVinci Resolve/DaVinci Resolve.app/Contents/Libraries/Fusion/fuscript
-NVM := . $$HOME/.nvm/nvm.sh >/dev/null 2>&1
+NVM := { [ -z "$$CI" ] && [ -s $$HOME/.nvm/nvm.sh ] && . $$HOME/.nvm/nvm.sh >/dev/null 2>&1; } || true
 OUT := $(CURDIR)/.out
 MCPB := ./node_modules/.bin/mcpb
 BUNDLE := dist/davinci-resolve-lua-mcp.mcpb
@@ -100,7 +101,7 @@ uninstall-bridge:
 	  if [ -f "$$p" ]; then rm -f "$$p" && echo "removed $$p"; else echo "not present: $$p"; fi; \
 	done
 
-## End-to-end smoke test against live Resolve with the bridge running (docs/plan.md Step 5): spawns the
+## End-to-end smoke test against live Resolve with the bridge running: spawns the
 ## built server/index.js over stdio, as Claude Desktop does, and drives the tools. It creates and deletes
 ## a timeline named bridge-smoke and changes the project's render TargetDir/CustomName, so SMOKE_PROJECT
 ## must name the open scratch project. The request-slot lock must be free: once the extension is

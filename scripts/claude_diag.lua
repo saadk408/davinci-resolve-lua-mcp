@@ -2,7 +2,7 @@
 -- RLB_STATE_DIR=@@RLB_STATE_DIR@@
 --
 -- Runs inside DaVinci Resolve's Workspace > Scripts Lua host and measures what that host can do,
--- for the davinci-resolve-lua-mcp project (docs/plan.md, Step 1). Output channels, in order:
+-- for the davinci-resolve-lua-mcp project. Output channels, in order:
 --   1. Fusion prefs: Global.ResolveLuaBridge.RLBDiag = hex(json(results)), via fusion:SetPrefs + SavePrefs
 --   2. Media Pool bins under a "claude_diag" bin in the OPEN project, one sub-bin per finding
 --   3. print() and a file write, both expected to be muted/blocked; their outcome is recorded in 1 and 2

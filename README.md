@@ -4,7 +4,7 @@
 
 ![Claude Desktop describing the open project next to the same project in DaVinci Resolve 21.1 free edition](docs/images/hero-image.png)
 
-DaVinci Resolve 21.1 moved Python scripting and the external scripting API to the Studio edition, and Blackmagic's own MCP server ships with Studio only. One door is still open on the free edition: `Workspace > Scripts` lists and runs Lua files. This project puts a small Lua script there. Launched once per Resolve session, it holds the live `resolve` object and executes Lua on behalf of an MCP server that Claude Desktop runs as an extension. Requests travel as a file, answers come back through Fusion's preferences file, and nothing leaves the Mac. The measurements and sources behind every design choice are in the `docs/` folder of the source repository.
+DaVinci Resolve 21.1 moved Python scripting and the external scripting API to the Studio edition, and Blackmagic's own MCP server ships with Studio only. One door is still open on the free edition: `Workspace > Scripts` lists and runs Lua files. This project puts a small Lua script there. Launched once per Resolve session, it holds the live `resolve` object and executes Lua on behalf of an MCP server that Claude Desktop runs as an extension. Requests travel as a file, answers come back through Fusion's preferences file, and nothing leaves the Mac.
 
 > [!NOTE]
 > Nothing here unlocks Studio features: the bridge uses the free edition's own Lua scripting API. Studio 21.1 users already have Blackmagic's native MCP server.
