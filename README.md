@@ -217,7 +217,7 @@ The developer loop: `make dev-register` once, then `make build` and restart Clau
 > [!NOTE]
 > `make smoke` creates and deletes a timeline named `bridge-smoke`, adds and deletes markers on it, and sets the project's render target directory and file name. `SMOKE_PROJECT` must be the name of the project that is open in Resolve, and it should be a scratch project, never a real edit. The run refuses to proceed when the names differ.
 
-Layout: `bridge/resolve_mcp_bridge.lua` is the in-Resolve loop (one dependency-free file, under 600 lines); `src/` is the TypeScript server (`server.ts` holds the 15 tools, `lua.ts` every Lua snippet and the one string-escaping helper, `protocol.ts` the request slot and lock, `prefs.ts` the `Fusion.prefs` reader, `bridgeInstall.ts` the self-install); `scripts/claude_diag.lua` is the Step 1 viability diagnostic that also ships in the bundle; `tests/` holds the Node suite and `tests/lua/` the `fuscript` checks; `docs/` holds the plan, the research, the diagnostic record and the review notes.
+Layout: `bridge/resolve_mcp_bridge.lua` is the in-Resolve loop (one dependency-free file, under 600 lines); `src/` is the TypeScript server (`server.ts` holds the 15 tools, `lua.ts` every Lua snippet and the one string-escaping helper, `protocol.ts` the request slot and lock, `prefs.ts` the `Fusion.prefs` reader, `bridgeInstall.ts` the self-install); `scripts/claude_diag.lua` is the sandbox diagnostic that also ships in the bundle; `tests/` holds the Node suite and `tests/lua/` the `fuscript` checks; `docs/images/` holds the README's screenshots.
 
 ## Acknowledgments
 

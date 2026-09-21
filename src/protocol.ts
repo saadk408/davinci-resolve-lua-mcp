@@ -321,7 +321,7 @@ export class BridgeClient implements Bridge {
   }
 
   /**
-   * Startup hygiene, lock owner only: a request file left by an earlier server (or the Step 1
+   * Startup hygiene, lock owner only: a request file left by an earlier server (or the sandbox
    * diagnostic) would make a bridge launched later pre-seed its `last_id` from it.
    */
   async removeStaleRequest(): Promise<boolean> {

@@ -28,7 +28,7 @@ test-lua: check-bridge
 check-bridge:
 	@sh tests/lua/check_bridge.sh bridge/resolve_mcp_bridge.lua
 
-## Node tests (node --test through tsx, in temp directories; the two fuscript-backed tests skip
+## Node tests (node --test through tsx, in temp directories; the fuscript-backed tests skip
 ## themselves when Resolve is not installed) after the src/ grep gates and the type check.
 test-node: check-server typecheck
 	@$(NVM) && npm test
@@ -76,7 +76,7 @@ bundle: build
 	@$(NVM) && $(MCPB) validate . && $(MCPB) pack . $(BUNDLE) && $(MCPB) info $(BUNDLE)
 	@$(NVM) && sh tests/check_bundle.sh $(BUNDLE)
 
-## Open the bundle so Claude Desktop shows its install dialog; the click is the user's (Step 5).
+## Open the bundle so Claude Desktop shows its install dialog; the click is the user's.
 install: bundle
 	@open $(BUNDLE)
 
@@ -104,8 +104,8 @@ uninstall-bridge:
 ## End-to-end smoke test against live Resolve with the bridge running: spawns the
 ## built server/index.js over stdio, as Claude Desktop does, and drives the tools. It creates and deletes
 ## a timeline named bridge-smoke and changes the project's render TargetDir/CustomName, so SMOKE_PROJECT
-## must name the open scratch project. The request-slot lock must be free: once the extension is
-## installed, disable it in Claude Desktop (or quit Claude Desktop) first. Log: .out/smoke.log, server
+## must name the open scratch project. The lock is per request, so it runs alongside the installed
+## extension; a lock_held answer names the pid that kept the slot busy. Log: .out/smoke.log, server
 ## stderr: .out/smoke-server.log. Extra flags via SMOKE_FLAGS (--no-render, --timeout <s>).
 smoke: build
 	@mkdir -p "$(OUT)"

@@ -278,7 +278,7 @@ for (const c of apiClasses) {
   }
 }
 emit("-- Globals: `resolve` is injected by the host; `Resolve()` is the shipped examples' form and");
-emit("-- returns a proxy that is not == the global (measured in Step 1).");
+emit("-- returns a proxy that is not == the global (measured).");
 emit("---@type Resolve");
 emit("resolve = ResolveClass");
 emit();

@@ -135,7 +135,7 @@ local function pset(path, v)
 end
 local function rlb(key) return pget(PREFIX .. key) end
 
--- Fusion writes strings with \" \\ \n escaped and everything else raw (measured, Step 1).
+-- Fusion writes strings with \" \\ \n escaped and everything else raw (measured on Resolve).
 local function lua_str(s)
   return '"' .. (s:gsub('[\\"\n]', { ["\\"] = "\\\\", ['"'] = '\\"', ["\n"] = "\\n" })) .. '"'
 end

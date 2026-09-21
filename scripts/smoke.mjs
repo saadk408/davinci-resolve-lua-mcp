@@ -360,7 +360,7 @@ return { name = tl:GetName(), unique_id = tl:GetUniqueId(), start_frame = tl:Get
       expect(r && typeof r.unique_id === 'string' && r.unique_id.length > 0, `unexpected result ${JSON.stringify(r)}`);
       st.smokeId = r.unique_id;
       expect(r.name === SMOKE_TIMELINE, `name ${JSON.stringify(r.name)}`);
-      expect(r.is_current === true, 'the new timeline is not the current one (Step 1 measured that it becomes current)');
+      expect(r.is_current === true, 'the new timeline is not the current one (measured: a new timeline becomes current)');
       return `unique id ${r.unique_id}, frames ${r.start_frame}..${r.end_frame}, current, page ${r.page}`;
     });
     if (!created) return 1;
@@ -421,7 +421,7 @@ return r`);
     let markersAdded = 0;
     const addMarker = (frame, name) => call('add_marker', { frame, color: 'Blue', name, note: SMOKE_TIMELINE, duration: 1 });
     if (hasContent) {
-      await check('add_marker frame 1 (relative to the timeline start, the Step 1 case)', async () => {
+      await check('add_marker frame 1 (relative to the timeline start, the measured case)', async () => {
         const r = await addMarker(1, 'smoke-1');
         expect(!r.isError, r.data.error ?? r.text);
         markersAdded += 1;

@@ -6,7 +6,7 @@
 -- undefined global. Sources:
 --   * `bmd`: the 28 keys measured in the free 21.1 menu host on this Mac on
 --     2026-09-20. Signatures are given
---     only where Step 1 measured them; the rest are `fun(...): any`.
+--     only where they were measured; the rest are `fun(...): any`.
 --   * The block between BEGIN GENERATED and END GENERATED is written by
 --     `scripts/gen-types.mjs` (`make gen-types`) from Blackmagic's
 --     `Developer/Scripting/DaVinciResolveScript.pyi` (the signature reference
@@ -17,7 +17,7 @@
 --     globals. Python `list[T]` is a Resolve "list" (1-indexed, carries
 --     `__flags`), typed `T[]`. Never edit the block by hand; `make lint-lua`
 --     fails when it is stale.
---   * `Fusion`: the ten methods that Step 1 saw on the `fusion` object. Only the
+--   * `Fusion`: the ten methods measured on the `fusion` object. Only the
 --     prefs channel and `MapPath` have measured signatures.
 -- Rules: keep `bmd` closed (a typo must be a warning); never silence a host
 -- global with `diagnostics.globals` in `.luarc.json`; declare it here instead.
@@ -3236,7 +3236,7 @@ function MediaStorage:AddItemsToMediaPool(...) end
 ---@field [string] fun(...): any  -- opaque in the .pyi (no methods declared)
 
 -- Globals: `resolve` is injected by the host; `Resolve()` is the shipped examples' form and
--- returns a proxy that is not == the global (measured in Step 1).
+-- returns a proxy that is not == the global (measured).
 ---@type Resolve
 resolve = ResolveClass
 

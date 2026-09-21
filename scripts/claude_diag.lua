@@ -1,4 +1,4 @@
--- claude_diag v0.1.0 (davinci-resolve-lua-mcp, Step 1 viability diagnostic)
+-- claude_diag v0.1.0 (davinci-resolve-lua-mcp sandbox diagnostic)
 -- RLB_STATE_DIR=@@RLB_STATE_DIR@@
 --
 -- Runs inside DaVinci Resolve's Workspace > Scripts Lua host and measures what that host can do,

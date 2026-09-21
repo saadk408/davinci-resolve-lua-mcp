@@ -1,112 +1,78 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code in this repository.
 
 ## What this is
 
-`davinci-resolve-lua-mcp` is an MCP server, shipped as an **MCPB bundle** for Claude Desktop, that controls **DaVinci Resolve 21.1 free edition on macOS**. Blackmagic removed Python and external scripting from the free edition in 21.1 and their native MCP server is Studio only. The one remaining door is a Lua script launched from `Workspace > Scripts` inside Resolve, which receives the live `resolve` object. That script runs as a long-lived in-app bridge and executes Lua on behalf of the server. Requests arrive as a file the bridge reads with `loadfile`; responses go back through `fusion:SetPrefs` + `fusion:SavePrefs()`, which the server reads from `Fusion.prefs` on disk. The server is **TypeScript on the v2 TypeScript SDK (`@modelcontextprotocol/server`)**, bundled by esbuild into one file and launched by the Node that ships inside Claude Desktop.
+`davinci-resolve-lua-mcp` is an MCP server, shipped as an MCPB bundle for Claude Desktop, that
+controls the free edition of DaVinci Resolve 21.1 on macOS. Free 21.1 has no Python and no external
+scripting, and Blackmagic's own MCP server is Studio-only. The one door left is a Lua script launched
+from `Workspace > Scripts` inside Resolve: it receives the live `resolve` object and runs as a
+long-lived in-app bridge that executes Lua for the server. Requests are a file the bridge reads with
+`loadfile`; responses go back through `fusion:SetPrefs` + `fusion:SavePrefs()`, which the server
+reads from `Fusion.prefs` on disk. The server is TypeScript on the v2 SDK
+(`@modelcontextprotocol/server`), bundled by esbuild into one CJS file that Claude Desktop runs with
+its own Node. Version 0.1.0 is the first public release.
 
-## Current state (as of 2026-09-20)
+`README.md` is the user documentation (install, start and stop, the 15-tool table with the `run_lua`
+guide, the settings and `RLB_*` variables, troubleshooting, security, uninstall, the make targets);
+do not repeat it here. `SECURITY.md` is the reporting policy. The planning documents were removed
+before release, so this file and the code comments are the design record.
 
-- **Step 0 is done.** `docs/plan.md` is the **single source of truth**: mission, measured ground truth, safety rules, protocol v1, repository layout, Steps 1-8 (Step 8 is the private instrumented build in a separate repository, outside the definition of done) and the definition of done. `docs/plan-review-2026-09.md` is the validation record (sections A-L explain every departure from the original spec, including the user-approved architecture changes: response channel via prefs, MCPB distribution, Node/TypeScript runtime) and `docs/research-2026-09.md` holds the evidence. The original mission spec was retired on 2026-09-20 and exists only in git history (commit `73eb388`); do not look for it.
-- **Step 1 is done (2026-09-20): verdict CONTINUE.** `docs/diagnostic-2026-09.md` is the verbatim
-  record (two runs, both decoded results, the prefs observer log, the user's report) and its
-  "Consequences for the plan" section lists what was folded into `docs/plan.md` and this file.
-  `scripts/claude_diag.lua` stays as the Step 1 record; its helpers were ported into the bridge.
-- **Step 2 is done (2026-09-20).** `bridge/resolve_mcp_bridge.lua` (581 lines, protocol v1) is the
-  in-Resolve loop; `tests/lua/run_tests.lua` (262 checks under `fuscript` against stub
-  `bmd`/`resolve`/`fusion` objects) and `tests/lua/check_bridge.sh` (grep gates) test it;
-  `scripts/gen-types.mjs` generates the API classes in `types/resolve_host.d.lua` from the `.pyi`;
-  the `Makefile` has `test-lua`, `check-bridge`, `lint-lua`, `gen-types`. The deviations from the
-  protocol text as first written, and the fixes from the review that followed the commit, are in
-  `docs/plan-review-2026-09.md` § M and folded into `docs/plan.md`.
-- **Step 3 is done (2026-09-20).** `src/` (nine modules, v2 SDK, CJS build to `server/index.js`),
-  `tests/*.test.ts` (64 `node --test` cases through tsx: fake bridge + temp dirs, in-memory
-  `Client`, three `fuscript`-backed tests), `manifest.json` (v0.4, parity-tested), `package.json`,
-  `tsconfig.json`, `tests/check_server.sh`, and the `Makefile` targets `build`, `test-node`,
-  `check-server`, `typecheck`, `inspect`. The built server answered the Inspector CLI and a
-  stdio probe (15 tools, `resolve_status` reporting `never_started`). Decisions are in
-  `docs/plan-review-2026-09.md` § N and folded into `docs/plan.md` "Protocol v1". The
-  Inspector's acceptance run performed the first-run self-install into the real Utility folder
-  (`resolve_mcp_bridge.lua` now sits next to `claude_diag.lua`).
-- **Step 4 is done (2026-09-21).** `src/main.ts` holds the wiring as `main(options)` with the
-  three no-op-by-default extension points (`wrapServer`, `onToolFailure`, `beforeExit`) and a
-  `runtime` seam for tests; `src/index.ts` is `void main()`; `ServerDeps.onToolFailure` is called
-  from `guard(tool, fn)` in `server.ts`. `.mcpbignore`, `tests/check_bundle.sh`,
-  `scripts/dev-register.mjs`, the `sentry` grep gate in `tests/check_server.sh`, the Makefile
-  targets `bundle`, `install`, `sign`, `dev-register`, `dev-unregister`, `uninstall-bridge`, and
-  `tests/main.test.ts` + `tests/devRegister.test.ts` (73 Node cases now). `make bundle` packs
-  `dist/davinci-resolve-lua-mcp.mcpb` (5 files, 204 KB packed, 943 KB unpacked) and the unpacked copy
-  answered `tools/list` with the 15 tools. Not run: `make install` (Step 5, the user's click),
-  `make dev-register` against the real `claude_desktop_config.json` (tested on temp files only),
-  `make uninstall-bridge` against the real Utility folder. Notes in `docs/plan-review-2026-09.md`
-  § P. Next is Step 5 (install and end-to-end check, USER), then Steps 6-8 in order. Step 8 is
-  the user's own Sentry-instrumented build: a separate private repository that holds this one as
-  a git submodule (`upstream/`), imports `main` from it, and packs its own bundle under the same
-  extension name (`docs/plan.md` Step 8 has the topology and the rules). Nothing from it belongs
-  in this repository.
-- **Step 5 is done (2026-09-21).** `scripts/smoke.mjs` + `make smoke SMOKE_PROJECT=<name>` / `make stop`
-  (24 checks PASS against the live bridge in the scratch project "New Project 2"; measurements in
-  `docs/plan.md` Step 5 Result and `docs/plan-review-2026-09.md` § Q). The bundle is installed in
-  Claude Desktop as `local.mcpb.saad-khan.davinci-resolve-lua-mcp` and answered the user's project-overview
-  question through `get_project_info`, `list_timelines` and `list_media_pool_clips`. Two host findings
-  changed the server: the request-slot lock is now per request (an idle server never holds it) and the
-  config expands `${HOME}` (see "Working in this repo"). Also measured: a second click of the script
-  takes over cleanly (the old loop exits on the first request for the newer session) and, with live
-  save on, `open_project` with `save_current=false` neither prompts nor loses work. Step 6 followed
-  the same day.
-- **Renamed 2026-09-21** from `resolve-lua-bridge` to **`davinci-resolve-lua-mcp`** (display name "DaVinci
-  Resolve Lua MCP", script `resolve_mcp_bridge.lua`, state dir `~/.davinci-resolve-lua-mcp`, extension id
-  `local.mcpb.saad-khan.davinci-resolve-lua-mcp`, bundle `dist/davinci-resolve-lua-mcp.mcpb`, dev-register key
-  `davinci-resolve-lua-mcp-dev`); the `RLB_*`/`RLB*` names and the `Global.ResolveLuaBridge.` prefs prefix stay.
-  Rationale, trademark note and the migration record are in `docs/plan-review-2026-09.md` § R. Reinstalled and
-  smoke-tested (24 PASS) under the new name the same day. `docs/diagnostic-2026-09.md`,
-  `docs/research-2026-09.md` and plan-review §§ A-Q predate the rename and keep the old names on purpose.
-- **Step 6 is done (2026-09-21).** `README.md` (229 lines, written with the repository's `create-readme`
-  skill): tagline and why, features, requirements, install, start and stop,
-  example prompts, the 15-tool table with a `run_lua` guide, the four settings and the eight `RLB_*`
-  variables, 13 troubleshooting entries, security, uninstall, development (`make` targets, the dev-register loop, the
-  smoke caveat), a short acknowledgments list and the § R trademark line. The inline research-row citations and the
-  "How it works" section (diagram, design choices) were removed the same day on the user's request (confusing
-  to a reader); one sentence in the intro points to `docs/` for the evidence, and definition-of-done item 6
-  is to be read that way in Step 7. It ships in the bundle: `make bundle` now packs 7
-  files (215 KB packed, 971 KB unpacked; `tests/check_bundle.sh` has listed `README.md` and `LICENSE` as
-  optional since Step 4). Later the same day the user supplied the extension icon: `icon.png` at the
-  repository root (512x512 PNG with transparent corners, a rainbow-spoked colour sun on a dark tile, drawn by
-  the user; reviewed for likeness to Blackmagic's mark and cleared), referenced by both manifest forms the spec
-  allows (`icon` and one `icons` entry with `size`), required by `tests/check_bundle.sh`; the bundle is 8 files,
-  498 KB packed. Same-day follow-up: `LICENSE` (standard MIT text, 2026, Saad Khan) added and shipped
-  in the bundle; three screenshots under `docs/images/` (hero, Scripts menu, extension settings; `.mcpbignore`
-  excludes `docs`, so the image links are dead inside the unpacked extension) wired into the README. The two
-  screen recordings (marker prompt, render prompt) are MP4s the user holds; they enter the README as
-  GitHub-hosted attachments (a bare attachment URL on its own line renders a player, the bytes never enter
-  git), which needs the repository to exist, so they belong to the post-push task together with badges, a
-  Releases link and a clone URL. Their spots: after the example prompts block and after the render warning. Notes in `docs/plan-review-2026-09.md` § S. Next is Step 7 (the definition-of-done check),
-  then Step 8 separately.
-- Git repository on `main`; `.gitignore` covers `.DS_Store`, `.remember/`, `.venv/`, `node_modules/`, `dist/`, `server/`, `*.mcpb`, `cert.pem`, `key.pem`, `.env`, and `docs/images/*.mp4` / `*.mov` (the README's screen recordings are GitHub-hosted attachments, kept on disk for the upload, never committed).
+## Rules
 
-## Hard gates, in order
+Not negotiable without the user's say-so.
 
-1. **Step 0: research and re-plan.** Done. Required Context7 (`resolve-library-id` + `query-docs`) and Exa; both are available in this environment.
-2. **Step 1: viability diagnostic.** Done 2026-09-20, verdict **CONTINUE**: the script observably ran (bins and prefs), `loadfile` of `~/.resolve-lua-bridge/next.lua` (the state dir at the time; now `~/.davinci-resolve-lua-mcp/`) returned its table and the code executed with captured `print`, every `SetPrefs`+`SavePrefs` landed in `Fusion.prefs` within the same second (1 to 6 ms per save), and the UI stayed responsive through two 30 s loops. `io` is nil as expected. Record: `docs/diagnostic-2026-09.md`.
-3. Only then write the bridge, server, bundle, tests, and README, in the order of `docs/plan.md`.
+- Architecture-level changes (the request file, the prefs response channel, the trust boundary, what
+  runs inside Resolve, the runtime, the distribution format) are presented to the user as a tradeoff
+  first. Implementation-level improvements can be adopted directly, with a note in a comment or here.
+- stdout is the MCP transport: `console.error` and the file log only, never `console.log` in `src/`.
+- No network listeners of any kind. Files in, prefs out.
+- Never modify anything under `/Applications` or `/Library` without asking; Blackmagic's docs folder
+  is read-only. The server writes only its state dir and the user Utility folder (its two Lua files)
+  and never creates Resolve's folders.
+- Destructive tools take `confirm: bool = false` and refuse when false. Development never runs
+  destructive Resolve operations except on objects the tests created; smoke runs and mutating Lua go
+  only to a scratch project the user names, never to a real edit.
+- When the user must click something in Resolve or Claude Desktop, stop and ask; never assume it
+  happened. `make install` and `make dev-register` (it edits the real Claude config) only on request.
+- Never launch the loop via `fusion:Execute` or a startup `.scriptlib` (either holds Fusion's shared
+  script executor for the session). Scripts-menu launch only.
+- The bridge never writes prefs while idle (only per request, plus one `RLBSession` at start and one
+  on clean stop), never deletes files, never calls `os.exit`, never blocks longer than one request,
+  and stays one dependency-free file under 600 lines.
+- Responses are capped and list tools paginate (`offset` + `limit`): every `SavePrefs` rewrites a
+  ~22 KB file that Resolve loads at startup.
+- Every tool declares `title` and `annotations` (read-only tools `readOnlyHint`; `run_lua` and
+  `delete_markers` `destructiveHint`; all `openWorldHint: false`). Descriptions describe; cross-tool
+  guidance lives in the server `instructions` string. Handlers never throw: every failure is an
+  `isError` result that names the next step.
+- Every string embedded in a Lua chunk goes through `luaString()` in `src/lua.ts`. Inputs are
+  untrusted: zod enums, bounded ints, a `limit` on list tools. `src/` never spawns a process (the grep
+  gate covers `src/` only; scripts and tests may spawn).
+- The manifest `tools[]` equals `tools/list`, and the versions in `package.json`, `manifest.json` and
+  `SERVER_VERSION` (`src/server.ts`) agree; one test enforces both.
+- v2 TypeScript SDK only (`McpServer`, `registerTool` with `zod/v4`, `serveStdio`; `InMemoryTransport`
+  + `Client` in tests); never the legacy `@modelcontextprotocol/sdk` 1.x, never Python.
+- Where Blackmagic's docs are silent (the host's libraries, `bmd.*`, `fusion:*Prefs`, the sandbox),
+  say so and rely on the measurements under "Resolve: measured facts".
+- Run `make test` before a commit; commit after each unit of work with a clear message.
 
-Architecture-level changes (the request file, the prefs response channel, the trust boundary, what runs inside Resolve, the runtime, the distribution format) must be presented to the user as a tradeoff before proceeding. Implementation-level improvements can be adopted directly, with a note in the relevant doc.
+## Environment traps
 
-## Machine ground truth (verified on this Mac)
+- A user-level PreToolUse hook blocks any Bash command whose text contains the literal
+  `node_modules`, even inside filters or heredocs. Build the string at run time
+  (`NM="node_""modules"`) or use Write/Edit; never retry the same command.
+- Another hook rejects any Bash command that names the memory directory or contains the word itself.
+  Read and write memory files with the Read/Write tools only.
+- Source nvm before Node tooling: `. ~/.nvm/nvm.sh`. The `compdef:153: _comps: assignment to invalid
+  subscript range` line is harmless zsh noise. The Makefile sources nvm itself unless `CI` is set.
+- Foreground `sleep` is blocked in the Bash tool. A long-running observer goes via
+  `nohup zsh script.sh args >/dev/null 2>&1 &` then `disown`, writes its pid to a file, and is killed
+  explicitly at the end.
+- In the Bash tool (zsh), `${pipestatus[1]}` is the exit code of a pipeline's first command.
 
-The Console measurements of 2026-09-19 in `docs/plan.md` ("Ground truth: measured facts about this machine") are authoritative. Verified 2026-09-20:
-
-- Resolve 21.1.0 build 21.1.00017, free edition. Blackmagic's scripting docs ship at `/Library/Application Support/Blackmagic Design/DaVinci Resolve/Developer/Scripting/`: `README.md` (31 Aug 2026), `CHANGELOG.md`, `DaVinciResolveScript.pyi`, `Examples/`, `Modules/`. **The README no longer contains API tables; `DaVinciResolveScript.pyi` is the signature reference** (typed, with docstrings, 16 marker colours). Use the `.pyi` for the `scripting_api_docs` tool and when writing tools. Deprecated forms to avoid: `GetSetting/SetSetting` (use `GetSettings()/SetSettings({})`), `GetItemsInTrack` (use `GetItemListInTrack`), index-based render job calls (ids are strings), single-arg `GetClipProperty`.
-- The free 21.1 Scripts-menu Lua state is sandboxed (measured on this Mac in Step 1, plus four community measurements): `io`, `os.execute`, `os.remove`, `os.rename`, `require`, `package`, `ffi`, `debug`, `UIManager`, `arg`, `bmd.readfile/writefile/readdir` are nil; `os` keeps `clock date difftime getenv time tmpname`; `print` output is invisible. Working: `setfenv`, `getfenv`, `loadfile`, `dofile`, `loadstring`, `load`, `pcall`, `xpcall`, `coroutine`, `bit`, `lpeg`, the 28 `bmd.*` keys of the Console list (`wait` sleeps, `gettime` is float seconds), the Resolve API, and `fusion:GetPrefs/SetPrefs/SavePrefs`. The host runs **in-process** (`bmd.getpid()` is Resolve's pid), the script environment is `_G` (which has a metatable), and `resolve`, `fusion`, `fu`, `app` are userdata globals (one `FusionUI` object behind the last three). `SavePrefs` returns nil, takes 1 to 6 ms even at 512 KB, writes a new inode each time; keys survive Resolve's own saves, a quit and a relaunch; in-memory `SetPrefs` state is shared across menu-script runs. `Workspace > Scripts` lists a newly copied `.lua` without a restart. `Global.Script.AllowAutomaticScripts = 0` does not stop menu scripts.
-- `Fusion.prefs` (the response channel) is at `~/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Profiles/Default/Fusion.prefs` (about 22 KB, Lua-table text, mode 0666, one profile).
-- User Utility folder: `~/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Utility/` (user-owned; since Step 1 it holds the stamped copy of `claude_diag.lua`). This is the **only** Resolve location this project may write to; the server self-installs its two Lua files there and nowhere else.
-- Resolve projects on this Mac: `New Project 1` (Step 1) and `New Project 2` (Step 5 smoke run) are scratch projects; `<real project>` is the user's real edit and must never be named in `SMOKE_PROJECT` or receive mutating Lua. Live save is on in the user's preferences (a user preference, not a `GetSettings()` key).
-- `fuscript` at `/Applications/DaVinci Resolve/DaVinci Resolve.app/Contents/Libraries/Fusion/fuscript` runs plain Lua from a terminal with a full, unsandboxed LuaJIT (`fuscript -l lua -x '...'`). It is the Lua test runner.
-- Claude Desktop 2.2553.1 (Electron 44.2.0). Extensions live in `~/Library/Application Support/Claude/Claude Extensions/<id>/`; nine registry extensions here are `type: node` launched with Claude's own Node; one local `type: uv` bundle ran only because Claude found the user's `~/.local/bin/uv`. Per-server logs: `~/Library/Logs/Claude/mcp-server-<Display Name>.log`. `claude_desktop_config.json` (mode 0600) has one other server (`notebooklm`); the developer loop merges into it, never clobbers, backs up first.
-- Node v24.0.1 and v22.15.0 via nvm (`. ~/.nvm/nvm.sh`), npm 11.7.0; `@modelcontextprotocol/server` 2.0.0 and `@modelcontextprotocol/client` 2.0.0 (the stable v2 line since the 2026-07-28 spec; `zod ^4.2`, Node >= 20; the single `@modelcontextprotocol/sdk` 1.30 package is legacy), esbuild 0.28.2, `@anthropic-ai/mcpb` 2.1.2 (a `devDependency` since 2026-09-21, run from the local bin; `npx --no` is unreliable on npm 11, it printed npm's own version). Python is not used by the server. The Xcode 27 licence was accepted on 2026-09-20, which unblocked Homebrew and `/usr/bin/python3` (3.9.6); an earlier note calling `python3` unusable is obsolete.
-
-## Architecture (protocol v1; docs/plan.md has the full reference)
+## Architecture (protocol v1)
 
 ```
 Claude Desktop --stdio--> MCPB "DaVinci Resolve Lua MCP" = node ${__dirname}/server/index.js
@@ -122,132 +88,282 @@ bridge/resolve_mcp_bridge.lua (Scripts-menu Lua state, holds live `resolve`)
       run needs the exact session id ("*" is for ping and stop only); a failed start save is retried once a second
 ```
 
-Layout: `manifest.json` (MCPB v0.4, since Step 3), `package.json`, `tsconfig.json`, `.mcpbignore` (Step 4), `src/` (`index.ts`, `server.ts` with the 15 tools, `config.ts`, `protocol.ts`, `prefs.ts`, `lua.ts`, `docsSearch.ts`, `bridgeInstall.ts`, `log.ts`), `server/index.js` (esbuild output, git-ignored, shipped), `bridge/resolve_mcp_bridge.lua` (one dependency-free file, under 600 lines), `scripts/` (`claude_diag.lua`, `gen-types.mjs`, `dev-register.mjs`, `smoke.mjs`), `icon.png` (the MCPB icon, shipped), `tests/` (`*.test.ts` under `node --test` via `tsx`, `helpers/`, `check_server.sh`; `tests/lua/` under `fuscript`), `dist/` (packed bundle, git-ignored), `Makefile`, `README.md`. Developer-only, must be listed in `.mcpbignore`: `.luarc.json`, `types/`, `scripts/gen-types.mjs`, `tests/`, `Makefile`, `.out/`, `tsconfig.json`, `package-lock.json` (Lua LSP configuration, generated host-global definitions and the test tooling, see "Working in this repo").
+- Prefs keys sit under `Global.ResolveLuaBridge.`: `RLBResp`, `RLBSession`, and the diagnostic keys
+  (`RLBDiag*`, `RLBMem`, `RLBLoop`, `RLBProbe*`) the bridge clears at start. The `RLB_*`/`RLB*` names
+  and this prefix predate the project's rename and stay on purpose: installed scripts depend on them.
+- Caps: 64 KB of JSON by default, 192 KB hard ceiling (before hex); prints 200 lines, 16 KB, 2048
+  bytes per line (constants in the bridge's `PRINT_MAX_*`/`MAX_KB_*` block and `src/config.ts`). Only
+  the chunk's first return value is sent (`extra_returns`); dropped prints count in `prints_dropped`.
+- The bridge resolves its state dir as stamp > `RLB_STATE_DIR` env > `HOME` > `MapPath("Profile:")`;
+  a `state_dir_match` of false in `resolve_status` means a hand-copied or stale script. After three
+  consecutive failed runs where `GetVersionString` also fails, the loop exits (status `no_reply`,
+  `pid_alive` true).
+- Runtime state: `RLB_STATE_DIR` (default `~/.davinci-resolve-lua-mcp`, 0700) holds `next.lua`,
+  `next.lua.tmp`, `lock` (a pid file hard-linked into place, taken per request, absent while idle)
+  and `server.log`. No queue directories, no heartbeat file, no stop file.
+- Layout: `src/` (ten modules; `main.ts` is the wiring, `server.ts` the tools, `lua.ts` the snippets,
+  `protocol.ts` the slot and lock, `prefs.ts` the reader, `bridgeInstall.ts` the self-install),
+  `server/index.js` (built, git-ignored, shipped), `bridge/resolve_mcp_bridge.lua`, `scripts/`
+  (`claude_diag.lua` ships; `gen-types.mjs`, `dev-register.mjs`, `smoke.mjs` are developer-only),
+  `types/resolve_host.d.lua` + `.luarc.json` (Lua LSP), `tests/`, `docs/images/` (README screenshots;
+  the MP4 recordings are git-ignored, GitHub-hosted), `.github/workflows/tests.yml`, `SECURITY.md`.
+  `tsconfig.json` covers `src/` and `tests/` only. The bundle is exactly the eight files allowlisted
+  in `tests/check_bundle.sh`; anything new goes into `.mcpbignore` (directories without trailing
+  slashes: `mcpb pack` walks with the `ignore` package after built-in excludes that do not cover
+  `node_modules`, `.claude`, `.remember` or `.out`).
 
-Runtime state: `RLB_STATE_DIR` (default `~/.davinci-resolve-lua-mcp/`, 0700) holding `next.lua`, `next.lua.tmp`, `lock` (a pid file hard-linked into place, taken per request and absent while idle), `server.log`. No queue subdirectories, no heartbeat file, no stop file.
+## Commands, CI and releasing
 
-## Commands
+Targets (`Makefile`; the README has the table): `test` = `test-lua` + `test-node`; `check-bridge`,
+`lint-lua`, `gen-types`; `build`, `typecheck`, `check-server`, `inspect`, `bundle`, `clean`;
+`install`, `sign`, `dev-register`/`dev-unregister`, `uninstall-bridge`; `smoke`, `stop`.
 
-Real targets (`Makefile`; the Node targets source nvm themselves):
+- `fuscript` exits 0 whatever the script does, so `make test-lua` passes only on the
+  `RLB_TESTS_RESULT: PASS` marker line.
+- `make inspect` spawns the server with a filtered environment: production paths and the first-run
+  self-install into the real Utility folder. Otherwise drive the built server by hand: pipe JSON-RPC
+  lines (`initialize`, `notifications/initialized`, `tools/list`, `tools/call`) into
+  `RLB_STATE_DIR=<tmp> RLB_AUTO_INSTALL=false node server/index.js`; answers come back one per line
+  on stdout, the log on stderr; in-flight calls finish after stdin closes (5 s grace).
+- Syntax check of one Lua file: `fuscript -l lua -x 'assert(loadfile("<abs>/f.lua")); print("ok")'`,
+  with the two-line banner filtered by `grep -v -e '^DaVinci Resolve Script' -e '^Copyright'`.
+- `make smoke SMOKE_PROJECT="<open project>"` mutates the named project (a `bridge-smoke` timeline,
+  the render TargetDir/CustomName, which the API cannot read back, hence the name must equal the open
+  project's). `SMOKE_FLAGS=--no-render`, `--timeout <s>`; logs under `.out/`. The lock is per
+  request, so it runs alongside the installed extension; `lock_held` names a pid whose request
+  outlasted the wait (or a stale lock whose pid is alive). Without `--project`, `scripts/smoke.mjs` is
+  the read-only coexistence check. A 10-minute watchdog fails the run when a modal in Resolve wedges
+  the bridge; the `Manual cleanup in Resolve:` line names what to delete by hand. The run refuses
+  until the installed script equals the repo's: the server compares the stamped files byte for byte,
+  so any edit to the bridge or `claude_diag.lua` reports `updated` on the next start and the user
+  must relaunch `Workspace > Scripts > resolve_mcp_bridge`.
+- `make bundle`: two packs give the same file list but different bytes (zip mtime); compare with
+  `zipinfo -1`. `mcpb` is the pinned local binary, never `npx` (unreliable on npm 11). `make sign` is
+  optional and self-signed.
+- `make dev-register` merges a `davinci-resolve-lua-mcp-dev` entry into the real config after backing
+  it up (flags in the script). A code change then needs `make build` and a Claude Desktop restart.
+- CI (`.github/workflows/tests.yml`) runs `make test-node` and `make bundle` on macOS with Node 20
+  and 24. The Lua tests and the smoke test need Resolve and stay local.
+- Releasing: bump `package.json` (`npm version --no-git-tag-version`), `manifest.json` and
+  `SERVER_VERSION`; when the Lua changed, also the bridge header (line 1 and `VERSION`),
+  `claude_diag.lua` (line 1 and `SCRIPT`), `BRIDGE_TAG` in `tests/helpers/fakeBridge.ts` and the
+  envelope in `tests/prefs.test.ts`. Then `make lint-lua`, `make test`, `make bundle`, CI green,
+  `make install` (the user's click), the user relaunches the script, `make smoke` on a scratch
+  project, tag `vX.Y.Z`, a GitHub Release with `dist/*.mcpb` attached (never committed) and its
+  sha256 in the notes. `SECURITY.md` promises support for the latest release only.
 
-- `make test` = `make test-lua` + `make test-node`.
-- `make test-lua`: `tests/lua/check_bridge.sh` (line count under 600, the two header lines, forbidden calls on comment-stripped lines, exactly one `:SetPrefs(`/`:SavePrefs(`/`:GetPrefs(` call site), then `fuscript -l lua tests/lua/run_tests.lua` against stub objects in a `mktemp -d` scratch dir. It passes only when the log ends with `RLB_TESTS_RESULT: PASS`, because `fuscript` exits 0 whatever the script does.
-- `make test-node`: `tests/check_server.sh` (no `console.log`/`process.stdout`, no `child_process`, no network modules or listeners in `src/`, no raw template hole inside a quoted Lua string in `lua.ts`, and the word `sentry` in any case nowhere in `src/`, `package.json` or `manifest.json`), `npm run typecheck` (`tsc --noEmit`), then `npm test` = `node --import tsx --test tests/*.test.ts` (75 cases, about 3 s; every fixture is a temp dir; the three `fuscript`-backed tests skip themselves when Resolve is absent; `devRegister.test.ts` spawns the script against a temp config).
-- `make build`: `tsc --noEmit`, then `esbuild src/index.ts --bundle --platform=node --format=cjs --target=node20 --outfile=server/index.js` (about 900 KB, git-ignored, shipped in the bundle).
-- `make inspect`: `make build`, then `npx @modelcontextprotocol/inspector --cli node server/index.js -- --method tools/list`. The Inspector spawns the server with a filtered environment, so it runs with the production defaults: real state dir, real prefs file, and the first-run self-install into the real Utility folder.
-- `make lint-lua`: `node scripts/gen-types.mjs --check` (the generated types block matches the installed `.pyi`), then `lua-language-server --check` of the workspace at Warning level as JSON in `.out/luals-check.json`; fails on any diagnostic under `bridge/` or `tests/` (the diag script's accepted warnings do not count).
-- `make gen-types`: rebuild the generated block of `types/resolve_host.d.lua` after a Resolve update changes the `.pyi` or README.
-- `make clean`: removes `server/`, `dist/`, `.out/`.
-- Syntax check of one Lua file: `"/Applications/DaVinci Resolve/DaVinci Resolve.app/Contents/Libraries/Fusion/fuscript" -l lua -x 'assert(loadfile("<abs>/file.lua")); print("ok")'` (absolute paths; the tool prints a two-line banner on stdout, filter it with `grep -v -e '^DaVinci Resolve Script' -e '^Copyright'`).
-- Drive the built server by hand: pipe JSON-RPC lines (`initialize`, `notifications/initialized`, `tools/list`, `tools/call`) into `RLB_STATE_DIR=<tmp> RLB_AUTO_INSTALL=false node server/index.js`; the answers come back one per line on stdout, the log on stderr. In-flight calls finish after stdin closes (5 s grace).
+## Tests
 
-- `make bundle`: `make build`, `mcpb validate .` (the manifest against the schema plus the icon check: the file exists and is a PNG; the CLI is pinned in `devDependencies` at `^2.1.2` and run from the local bin, never fetched by `npx`), `mcpb pack . dist/davinci-resolve-lua-mcp.mcpb` (what `.mcpbignore` leaves in: `manifest.json`, `package.json`, `server/index.js`, `bridge/resolve_mcp_bridge.lua`, `scripts/claude_diag.lua`, `README.md`, `LICENSE`, `icon.png`; 8 files, 498 KB packed, 1.2 MB unpacked since Step 6; the 512 px icon is 284 KB and does not compress), `mcpb info`, then `tests/check_bundle.sh` (the `zipinfo -1` file list against an allowlist, size under 2 MB, `unzip` into a temp dir and a stdio `initialize`/`tools/list` probe of the unpacked `server/index.js` under a temp `RLB_STATE_DIR` with `RLB_AUTO_INSTALL=false`, so nothing outside the temp dir is touched). Two packs give the same file list but different bytes (the zip mtime is the pack time).
-- `make install`: `make bundle`, then `open dist/davinci-resolve-lua-mcp.mcpb` so Claude Desktop shows its install dialog. The click is the user's (Step 5); never run it unasked.
-- `make sign`: optional `mcpb sign --self-signed` + `mcpb verify` (writes `cert.pem`/`key.pem`, git-ignored and bundle-ignored).
-- `make dev-register` / `make dev-unregister`: `scripts/dev-register.mjs` merges (or removes) a `davinci-resolve-lua-mcp-dev` entry in `~/Library/Application Support/Claude/claude_desktop_config.json` that runs `<repo>/server/index.js` with the current Node binary (`process.execPath`); backs the file up to `<file>.bak-<stamp>` first, keeps every other key, writes tmp + rename with mode 0600, refuses an unparsable file. Flags: `--config <path>`, `--name <key>`, `--env <path>` (`RLB_*` lines of a `KEY=VALUE` file become the entry's env; default `<repo>/.env`), `--dry-run`, `--remove`. It changes the user's Claude Desktop config: run it against the real file only when the user asks; the tests use temp files.
-- `make uninstall-bridge`: `rm -f` of exactly `resolve_mcp_bridge.lua` and `claude_diag.lua` under `RLB_SCRIPTS_DIR` or the default user Utility folder, printing each path; touches nothing else.
+- Lua harness (`tests/lua/`): `fuscript -l lua <file>` runs the main script in a sandbox whose
+  `__index` is `_G`, while `dofile`d chunks run in `_G` itself, so stubs go in with `rawset(_G, ...)`,
+  `Resolve` and `bmd.scriptapp` are removed with `rawset`, `bmd` is replaced (`wait` a no-op,
+  `gettime` a clock the tests advance) and `HOME` is redirected through the environment. The bridge
+  is loaded with `assert(loadfile(path))("RLB_BRIDGE_TESTING")`, a vararg the menu host never passes,
+  which makes it return its internals instead of starting the loop; `start({resolve, fusion,
+  state_dir, getenv})` injects the rest. `dkjson` and `io` come from `rawget(_G, "require")` and
+  `rawget(_G, "io")` because `.luarc.json` disables `package` and `io`. Absolute paths everywhere.
+- `tests/lua/check_bridge.sh` gates: under 600 lines (nine of headroom today), the two header lines,
+  the stamp literal, forbidden names on comment-stripped lines, and exactly one `:SetPrefs(`,
+  `:SavePrefs(`, `:GetPrefs(` call site each. A new prefs call or a `debug.`/`io.` reference fails by
+  design: reach `debug` through `gread`, keep prefs writes inside `set_pref`/`save_prefs`.
+- Node suite (`node --test` through `tsx`): never touches `~/Library` or `/Library`; the `RLB_*`
+  directories point at `tests/helpers/tmp.ts` temp dirs; `tests/helpers/fakeBridge.ts` answers
+  `next.lua` by rewriting a Fusion-format prefs file and models the bridge's failure modes; tool
+  tests use a recording `Bridge` stub (`createServer` takes the interface) and assert on the captured
+  Lua; the `fuscript`-backed tests skip themselves when Resolve is absent. Test files cannot use
+  top-level `await` (CJS); use `existsSync` for skips. Files run concurrently, so after touching the
+  locking in `protocol.ts` loop the suite:
+  `for i in 1 2 3 4 5 6 7 8; do node --import tsx --test tests/*.test.ts | grep -q '^✖' && echo FAIL; done`
+- `tests/check_server.sh` greps `src/` (no `console.log`, `process.stdout`, `child_process`, network
+  modules, `.listen(`, raw template holes in Lua strings, plus the vendor-name gate it explains);
+  `tests/check_bundle.sh` checks the packed file list, size under 2 MB and a stdio `tools/list` probe
+  of the unpacked server under a temp state dir with the self-install off.
+- `make lint-lua`: `gen-types.mjs --check` (stale means `make gen-types`), then `lua-language-server
+  --check` at Warning level as JSON in `.out/luals-check.json`; the server exits 1 whenever any
+  diagnostic exists, so the target greps the report for `bridge/` and `tests/` (rc 127: binary
+  missing). Accepted: `claude_diag.lua` keeps its `need-check-nil` warnings and one deliberate
+  undefined `io` probe. Probe the generated types with a scratch `.lua` under the repo, then delete it.
 
-- `make smoke SMOKE_PROJECT="<open project>"` (Step 5): `make build`, then `scripts/smoke.mjs` spawns the built
-  `server/index.js` over stdio exactly as Claude Desktop does (`Client` + `StdioClientTransport` from
-  `@modelcontextprotocol/client`, a devDependency) and drives the real tools against the live bridge:
-  tools/list, `scripting_api_docs`, `resolve_status` (must be alive, `bridge_script.outcome` `up_to_date`,
-  the running loop's version equal to the repo's), latency (five `run_lua` round trips), prints and a
-  Lua error, `get_project_info`, `list_projects`, `list_timelines` (refuses if a `bridge-smoke` timeline
-  exists), then creates `bridge-smoke`, inserts a Solid Color generator (falls back to appending a
-  root-bin clip), `add_marker` at frames 1 and 0 and the occupied-frame refusal, `GetMarkers` read-back,
-  pagination of `get_timeline_items` and `list_media_pool_clips`, a 200 KB `run_lua` truncation,
-  `delete_markers` refusal and deletion, `render_current_timeline` + `get_render_status` polling from the
-  current page (measures whether the Deliver page is needed), then deletes the timeline, the render job
-  and its temp dir and restores the previous timeline and page. Output: one `PASS|FAIL|SKIP|INFO` line
-  per check and `SMOKE_RESULT: PASS|FAIL`; log in `.out/smoke.log`, the server's stderr in
-  `.out/smoke-server.log`. `SMOKE_PROJECT` must equal the open project's name because the render check
-  sets the project's render TargetDir/CustomName, which the API cannot read back; without it the run
-  stops after `resolve_status` and prints the open project's name. `SMOKE_FLAGS=--no-render` skips the
-  render; `--timeout <s>` is the `run_lua` wait. The request-slot lock is taken per request, so the
-  script and the installed extension share the bridge; a `lock_held` answer names the pid (and command)
-  that kept the slot busy longer than the wait, which means a long chunk elsewhere or a stale lock whose
-  pid is alive. On a machine where the server never ran, the first `make smoke` performs the
-  self-install and stops with `never_started` and the start instruction.
-- `make stop`: `scripts/smoke.mjs --stop` calls `stop_bridge` through the built server; the bridge must
-  be relaunched from `Workspace > Scripts` afterwards.
+## Resolve: measured facts
 
-## Project-specific rules
+Measured on the free edition this project targets (21.1). Blackmagic documents none of the host
+facts; a point release can change them.
 
-Mirror of `docs/plan.md` "Safety and behaviour rules" (the original spec's rules plus those learned in Step 0). Not negotiable without the user's say-so; if the two ever differ, `docs/plan.md` wins.
+- The scripting docs ship at
+  `/Library/Application Support/Blackmagic Design/DaVinci Resolve/Developer/Scripting/` (`README.md`,
+  `CHANGELOG.md`, `DaVinciResolveScript.pyi`, `Examples/`, `Modules/`), read-only. The README there
+  has no API tables: the `.pyi` is the signature reference (quote it, do not recall it).
+- Point release: compare the `*Last Updated:*` line of the shipped README and the CHANGELOG, then
+  `make gen-types` and `make lint-lua`. `parseReadmeLists` in the generator and `DEPRECATED_SECTIONS`
+  in `src/docsSearch.ts` key on the exact README headings for deprecated and unsupported names, so a
+  renamed heading silently drops the tags. The Node tests use fixtures: a real docs change is caught
+  only by `make lint-lua` and the `scripting_api_docs` check in `make smoke`. Re-measure the sandbox
+  by running `claude_diag` from the Scripts menu in a scratch project and decoding `RLBDiag`; the
+  `bmd` class in `types/resolve_host.d.lua` is hand-written.
+- The Scripts-menu Lua state is sandboxed. nil: `io`, `os.execute`, `os.remove`, `os.rename`,
+  `require`, `package`, `ffi`, `debug`, `UIManager`, `arg`, `bmd.readfile/writefile/readdir`; `os`
+  keeps `clock date difftime getenv time tmpname`; `print` output is invisible. Working: `setfenv`,
+  `getfenv`, `loadfile`, `dofile`, `loadstring`, `load`, `pcall`, `xpcall`, `coroutine`, `bit`,
+  `lpeg`, the 28 `bmd.*` keys of the Console list (`wait` sleeps, `gettime` is float seconds), the
+  Resolve API, and `fusion:GetPrefs/SetPrefs/SavePrefs`. The host runs in-process (`bmd.getpid()` is
+  Resolve's pid), the script environment is `_G` (which has a metatable), and `resolve`, `fusion`,
+  `fu`, `app` are userdata globals (one `FusionUI` object behind the last three). The Console is a
+  different state: the menu host has its library set plus `setfenv`/`getfenv`, minus `debug`.
+- `SavePrefs` returns nil, takes single-digit milliseconds even at 512 KB and writes a new inode each
+  time; keys survive Resolve's own saves, a quit and a relaunch; in-memory `SetPrefs` state is shared
+  across menu-script runs. `Workspace > Scripts` lists a newly copied `.lua` without a restart.
+  `Global.Script.AllowAutomaticScripts = 0` does not stop menu scripts. `Fusion.prefs` is
+  `~/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Profiles/Default/Fusion.prefs`
+  (about 22 KB of Lua-table text, mode 0666, one profile).
+- The user Utility folder
+  `~/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Utility/` is the
+  only Resolve location this project writes. `fuscript` at
+  `/Applications/DaVinci Resolve/DaVinci Resolve.app/Contents/Libraries/Fusion/fuscript` runs plain
+  Lua from a terminal with a full, unsandboxed LuaJIT (`-l lua -x '...'`) and is the Lua test runner.
+- Measured live: a second click of the script takes over cleanly (the old loop exits on the first
+  request for the newer session); with live save on, `open_project` with `save_current=false` neither
+  prompts nor loses work (live save is a user preference, not a `GetSettings()` key); `LoadProject`
+  on a dirty project can raise a modal the bridge cannot answer, so `open_project` saves first by
+  default and interactive render mode stays off.
 
-- **stdout is the MCP transport.** Log with `console.error` and the file log only; `console.log` is never called anywhere in `src/`.
-- **No network listeners of any kind.** Files in, prefs out.
-- **Never modify anything under `/Applications` or `/Library`** without asking. The server writes to the user Utility folder only (its two Lua files) and never creates Resolve's folders; if the folder is missing it reports that through `resolve_status`. Running `fuscript` read-only is fine.
-- **Destructive tools** take `confirm: bool = False` and refuse when false. Never run destructive Resolve operations during development except on timelines, bins or projects the tests created.
-- **When the user must click something in Resolve or Claude Desktop, stop and ask.** Do not assume it happened.
-- **Never launch the bridge loop via `fusion:Execute` or a startup `.scriptlib`** (it holds Fusion's shared script executor for the session). Scripts-menu launch only.
-- **The bridge never writes prefs while idle** and never on error paths during shutdown. Prefs writes happen only in response to a request, plus one `RLBSession` at start and one on clean stop.
-- The bridge never deletes files (it cannot), never calls `os.exit`, never blocks longer than one request, and stays dependency-free.
-- Responses are capped (64 KB of JSON by default, 192 KB hard ceiling, before hex) because every `SavePrefs` rewrites a 22 KB file Resolve loads at startup; list tools paginate with `offset` + `limit`.
-- **Every MCP tool declares `title` and `annotations`**: read-only tools `readOnlyHint: true`; `run_lua` and `delete_markers` `destructiveHint: true`; all `openWorldHint: false`. Descriptions describe; cross-tool guidance lives in the server `instructions` string, never in descriptions. Handlers never throw: every failure is an `isError` result that names the next step.
-- **Every string a tool embeds in a Lua chunk goes through the one `luaString()` escaping helper.** Tool inputs are untrusted even though Claude sends them. Enums are zod enums, ints are bounded, list tools take a `limit`. The server never spawns a process.
-- **The manifest's `tools[]` list stays identical to the server's `tools/list`** (a test enforces it). The manifest is `manifest_version "0.4"`, `platforms ["darwin"]`, `runtimes.node ">=20.0.0"`; code uses only Node 20 APIs.
-- Framework is the v2 TypeScript SDK: `McpServer` from `@modelcontextprotocol/server`, `registerTool` with `z.object(...)` schemas from `zod/v4`, `serveStdio` from `@modelcontextprotocol/server/stdio`, tests with `InMemoryTransport` (from `@modelcontextprotocol/server`) + `Client` (from `@modelcontextprotocol/client`). Not the legacy `@modelcontextprotocol/sdk` 1.x, not Python. See `docs/plan-review-2026-09.md` §§ J-K and research 13.8.
-- Commit after each step with a clear message.
+## Lua conventions
 
-## Lua conventions the bridge and tools must respect
-
-- **Before writing any Lua, read the official Resolve scripting documentation in `/Library/Application Support/Blackmagic Design/DaVinci Resolve/Developer/Scripting/` and treat it as the source of truth**: `DaVinciResolveScript.pyi` for every method signature, argument order, return shape and enum (quote it, do not recall it); `README.md` for calling conventions, list/dict semantics, the Studio/AI section and the Deprecated and Unsupported sections; `CHANGELOG.md` for what 21.1 added; `Examples/*.lua` for idioms only (they use deprecated calls). Read-only: never modify anything in that folder. Where the docs are silent (the Lua host's libraries, `bmd.*`, `fusion:*Prefs`, the free-edition sandbox), say so and rely on the measurements in `docs/plan.md` and research § 3.
-- Lua 5.1 (LuaJIT): colon calls on API objects, 1-indexed tables, `return` to send a value back. `xpcall(f, handler)` takes no extra arguments in 5.1, so wrap calls in a closure; `debug` is nil in the menu host, so the handler falls back to `tostring` when `debug.traceback` is absent.
-- Obtain `resolve` with a plain global read (not `rawget`, a metatable on `_G` would hide it), then `Resolve()` if that is a function (the shipped examples' form), then `bmd.scriptapp("Resolve")`. `fusion` is the first of the `fusion`, `fu`, `app` globals that has a `SetPrefs` method, else `resolve:Fusion()` (measured: all one object).
-- Resolve "lists" are 1-indexed plain tables that carry `__flags = 4194304` (measured on every list; strip it; iterate with `for i = 1, #list`, never `pairs`); "dicts" are plain tables without `__flags`, keyed by name, and some (`GetMarkers()`) by integer frame. API objects are userdata: `pairs` and `#` throw on them, `==` works between two fetches of the same object. Encoder rules: a table is a JSON array only when its keys are exactly 1..n; any other integer-keyed table is an object with string keys; userdata, functions and tables with a metatable become a `tostring()` placeholder, never a crash. Numbers: integral (`n == math.floor(n)`, never `%d`, which silently truncates 3.5 to 3 under LuaJIT) and below 2^53 -> `%.0f`, else `%.17g`; NaN/inf become null. `GetSettings()` returns the frame rate as a number and resolution as strings and has no `useCustomSettings` key on this build; `AddRenderJob()` returns `""` on failure, which is truthy in Lua, so check `#jobId > 0`; check every boolean the API returns. Marker frames are relative to the timeline start (measured). `AddSubFolder` makes the new folder current and allows duplicate names, so look bins up by name first and restore with `SetCurrentFolder`; `CreateEmptyTimeline` makes the new timeline current inside the current folder.
-- An empty Lua table encodes as `[]` when it carried Resolve's `__flags` key (an empty API list) and as `{}` otherwise (the encoder cannot tell an empty plain table from an empty dict), so the server treats `{}` as `[]` wherever a list is expected, and tests assert with `Array.isArray(x) ? x : []`. Only the chunk's first return value is sent (`extra_returns` counts the rest); prints are capped at 200 lines / 16 KB (`prints_dropped`).
+- Before writing any Lua, read the shipped docs: the `.pyi` for every signature, argument order,
+  return shape and enum; the README for calling conventions and the Deprecated and Unsupported
+  sections; `Examples/*.lua` for idioms only (they use deprecated calls and `os.exit`). Colon calls,
+  1-indexed tables, lowercase page names, `return` to send a value: see the README's `run_lua` guide.
+- Lua 5.1 (LuaJIT): `xpcall(f, handler)` takes no extra arguments, so wrap calls in a closure;
+  `debug` is nil, so the handler falls back to `tostring` when `debug.traceback` is absent.
+- Obtain `resolve` with a plain global read (not `rawget`; the `_G` metatable would hide it), then
+  `Resolve()` if that is a function, then `bmd.scriptapp("Resolve")`. `fusion` is the first of
+  `fusion`, `fu`, `app` with a `SetPrefs` method, else `resolve:Fusion()`.
+- Resolve "lists" are 1-indexed tables carrying `__flags = 4194304` (strip it; iterate with
+  `for i = 1, #list`, never `pairs`); "dicts" are plain tables keyed by name, some (`GetMarkers()`) by
+  integer frame. API objects are userdata: `pairs` and `#` throw, `==` works between two fetches.
+- Encoder rules: a table is a JSON array only when its keys are exactly 1..n; any other integer-keyed
+  table becomes an object with string keys; userdata, functions and metatabled tables become a
+  `tostring()` placeholder, never a crash. Integral numbers below 2^53 use `%.0f`, others `%.17g`,
+  never `%d` (it silently truncates 3.5 to 3 under LuaJIT); NaN and inf become null.
+- An empty table encodes as `[]` when it carried `__flags` (an empty API list) and as `{}` otherwise,
+  so the server treats `{}` as `[]` wherever a list is expected and tests assert with
+  `Array.isArray(x) ? x : []`.
+- API quirks: `GetSettings()` returns the frame rate as a number and resolution as strings and has no
+  `useCustomSettings` key; `AddRenderJob()` returns `""` on failure, which is truthy, so check
+  `#jobId > 0`; check every boolean the API returns; marker frames are relative to the timeline
+  start; `AddSubFolder` makes the new folder current and allows duplicate names (look bins up by name
+  first, restore with `SetCurrentFolder`); `CreateEmptyTimeline` makes the new timeline current.
 - `bmd.readstring`/`bmd.writestring` are Lua-table serialisers, not file I/O.
-- The Console and the Scripts-menu host are different states; the menu host is what the bridge runs in, and Step 1 measured it on this Mac (`docs/diagnostic-2026-09.md`): the same library set as the Console plus `setfenv`/`getfenv`, minus `debug`. Blackmagic's docs say nothing about the host's libraries, `bmd.*`, `fusion:*Prefs` or the free-edition sandbox; those facts are measured, not documented, and a point release can change them.
-- Lua never expands `~`: build every path from `os.getenv("HOME")` or the `RLB_STATE_DIR` header the server stamps into the Lua files at copy time. The bridge holds the placeholder in a `[==[@@RLB_STATE_DIR@@]==]` literal and in its line-2 comment; the server replaces both verbatim and refuses a path containing `]==]`. Page names for `OpenPage` are lowercase. `LoadProject` on a dirty project can raise a modal the bridge cannot answer, so `open_project` saves first by default and interactive render mode stays off. The shipped `Examples/*.lua` use deprecated calls and `os.exit`; they are reference for conventions only, the `.pyi` is the signature source.
+- Lua never expands `~`: build every path from `os.getenv("HOME")` or the `RLB_STATE_DIR` header the
+  server stamps into the Lua files at copy time. The contract spans the bridge (the
+  `[==[@@RLB_STATE_DIR@@]==]` literal and the line-2 comment), `stateDirStampProblem()` in
+  `src/config.ts` (refuses `]==]`, `"`, `\`, CR/LF and a leading `@@`), `src/bridgeInstall.ts`
+  (replaces every occurrence) and `check_bridge.sh`.
+
+## TypeScript conventions
+
+- CJS package (no `"type": "module"`), `tsconfig` `module: NodeNext` in CJS mode: relative imports
+  end in `.js`, `__dirname` works. `@types/node` is pinned to 20 so `tsc` rejects newer APIs.
+  `import * as z from 'zod/v4'`; `InMemoryTransport` comes from `@modelcontextprotocol/server`,
+  `Client` from `@modelcontextprotocol/client`. `outputSchema` uses `z.looseObject` because the v2
+  client rejects extra keys in `structuredContent` against a strict `z.object`; `isError` results
+  skip output validation. Context7 id `/modelcontextprotocol/typescript-sdk` (`main`) is the v2 SDK;
+  check versions with `npm view @modelcontextprotocol/server version` (`npm view
+  @modelcontextprotocol/sdk` shows only the legacy line).
+- `main(options)` in `src/main.ts` is the wiring; `src/index.ts` is `void main()`. Its three hooks are
+  a stable extension surface for downstream builds that import `main`, no-ops by default:
+  `wrapServer` (applied in the `serveStdio` factory right after `createServer`; must return that
+  `McpServer` or a Proxy over it, `serveStdio` checks `instanceof`), `onToolFailure` (called from
+  `guard(tool, fn)` in `server.ts` wherever a thrown `BridgeError` becomes an `isError` result; never
+  on success, never for Lua-side failures, never from `resolve_status`; a throw inside it is logged
+  and ignored) and `beforeExit` (awaited on every exit path behind a ref'd 2 s timer, ref'd on
+  purpose so Node cannot exit before `exit(code)`). `options.runtime` (`env`, `proc`, `transport`,
+  `beforeExitCapMs`) is a test seam: `tests/main.test.ts` drives `main()` in-process with a fake
+  `EventEmitter` process and the server half of `InMemoryTransport.createLinkedPair()`. Never register
+  on the real `process` in a test: a `node --test` child's stdin ends at once and would arm a real
+  `process.exit`.
+- The request-slot lock is per request, never held while idle: `BridgeClient.request()` takes it,
+  waits up to the request's own timeout for a live holder, releases it in `finally`; `status()`
+  reports the holder without the lock; `main.ts` takes it for a moment at startup to remove a
+  leftover `next.lua`. Why: Claude Desktop launches the server several times on install and keeps one
+  idle "era probe" sibling alive for the whole session, in utility processes with stdin on
+  `/dev/null` (the stdin-closed exit path never fires there); a startup lock would be owned by that
+  sibling for ever and every request would answer `lock_held`.
+- `expandHome()` in `src/config.ts` expands a leading `~` and `${HOME}`, because Claude Desktop passes
+  a `user_config.default` such as `${HOME}/.davinci-resolve-lua-mcp` to the server literally.
+- Scripts that spawn the server use `StdioClientTransport` (`@modelcontextprotocol/client/stdio`),
+  which gives the child `getDefaultEnvironment()` (`HOME LOGNAME PATH SHELL TERM USER`) plus the
+  `env` option only, so every `RLB_*` variable is passed explicitly. `Client.callTool` returns
+  `structuredContent` for `isError` results too, validates successes against `outputSchema` (a
+  mismatch throws), and its default timeout is 60 s, the same as the render wait, so pass a timeout
+  per call. `close()` ends stdin, then SIGTERM after 2 s, then SIGKILL; both exit paths release the
+  lock.
+
+## Claude Desktop
+
+- Extensions live in `~/Library/Application Support/Claude/Claude Extensions/<id>/`; this one is
+  `type: node`, run with Claude's bundled Node (the host resolves the user's login PATH but maps a
+  bare `node` to its own).
+- `~/Library/Logs/Claude/mcp-server-DaVinci Resolve Lua MCP.log` records the manager's connection
+  (`initialize`, `tools/list`, era probes, shutdowns) but not the chat's tool calls; stderr is also
+  copied into `main.log` as `[UtilityProcess stderr]`, and `grep -h '\[MCP Launch\]\|\[UV Discovery\]'
+  ~/Library/Logs/Claude/main*.log` shows how an extension was resolved and started. To prove a tool
+  ran, decode the last `RLBResp` (see "Working here").
+- `claude_desktop_config.json` (mode 0600) may hold other servers; the dev loop merges into it and
+  backs it up first, never clobbers.
+- Reinstalling the same version shows no dialog: remove the extension under Settings > Extensions,
+  then `open dist/davinci-resolve-lua-mcp.mcpb` (or `make install`). Verify from
+  `~/Library/Application Support/Claude/extensions-installations.json` (`installedAt`, `hash` = the
+  sha256 of the `.mcpb`) and the new `starting` lines in `~/.davinci-resolve-lua-mcp/server.log`
+  (several per launch, one per probe sibling).
 
 ## Language servers: use them
 
-Two LSP plugins are active in this repo. They back the `LSP` tool (`hover`, `documentSymbol`, `workspaceSymbol`, `goToDefinition`, `findReferences`, `goToImplementation`, `prepareCallHierarchy`, `incomingCalls`, `outgoingCalls`; line and character are 1-based and must sit on the identifier) and the diagnostics block the harness appends after every Write or Edit of a `.lua`, `.ts`, `.mts`, `.mjs` or `.cjs` file. Both were verified on 2026-09-20 (Lua: hover on `bmd.wait` shows the typed signature; TypeScript: a probe's type error, hover and references came back).
+Two LSP plugins back the `LSP` tool (line and character are 1-based and must sit on the identifier)
+and the diagnostics block the harness appends after every Write or Edit of a `.lua`, `.ts` or `.mjs`
+file.
 
-- **Lua LSP** (`lua-lsp`, project scope in `.claude/settings.json`): the plugin only wires the tool to a `lua-language-server` binary on PATH (Homebrew, 3.19.1). The server reads `.luarc.json` at the repo root: `runtime.version` is `LuaJIT` (the menu host is LuaJIT 2.1, so `setfenv`/`getfenv`/`bit` are legal and Lua 5.4 deprecation warnings are wrong) and `runtime.builtin` disables `io`, `ffi`, `debug` and `package`, so a direct `io.open`, `require` or `debug.traceback` in bridge code is flagged as an undefined global, mirroring the measured sandbox (`os.execute`/`os.remove` cannot be disabled per key; the Makefile grep checks stay the guard for those). Host globals live in `types/resolve_host.d.lua` (`---@meta _`): all 28 measured `bmd` keys as a closed class so a typo warns, `Resolve` methods and constants quoted from the `.pyi`, `Fusion` with `Execute`/`RunScript` marked `@deprecated` so the LSP warns on them, and, between the `BEGIN GENERATED`/`END GENERATED` markers, every API class, TypedDict and enum generated from the `.pyi` by `scripts/gen-types.mjs`, with the README's deprecated names marked `@deprecated` (validated 2026-09-20: `undefined-field`, `missing-parameter`, `deprecated` and `param-type-mismatch` fire on wrong calls). Never edit the generated block by hand: change the generator, run `make gen-types`; `make lint-lua` fails when the block is stale. Add new host facts there; never add a name to `diagnostics.globals`, which only mutes the warning and hides typos (validated: `bmd.nosuchfn()` passed silently under the globals list, warned under the meta file). Claude Code's LSP client answers no configuration requests, so `.luarc.json` is the only way to configure the server; the server runs its own file watcher and picked up a freshly written `.luarc.json` and types file within a minute with no restart. Headless check: `lua-language-server --check . --checklevel=Information --check_format=pretty` (ANSI-coloured; every diagnostic is printed twice).
-- **TypeScript LSP** (`typescript-lsp`, user scope, so it is on in every repo): `typescript-language-server` 5.1.3 with `typescript` 5.9.3, installed globally under nvm's Node 24 (`~/.nvm/versions/node/v24.0.1/bin`), so it is on PATH only in a shell that sourced nvm. Launched with `--stdio`; it reads `tsconfig.json` once Step 3 creates it (loose files get tsserver's inferred project until then). It has no headless mode: `npx tsc --noEmit` is the batch equivalent and stays in `make build`.
+- Lua: the `lua-lsp` plugin (project scope, `.claude/settings.json`) wires the tool to a
+  `lua-language-server` on PATH (Homebrew). `.luarc.json` sets `runtime.version` to `LuaJIT` (so
+  `setfenv`/`getfenv`/`bit` are legal and Lua 5.4 deprecation warnings are wrong) and disables `io`,
+  `ffi`, `debug` and `package` to mirror the sandbox (`os.execute`/`os.remove` cannot be disabled per
+  key; the grep gates guard those). Host globals live in `types/resolve_host.d.lua`: the 28 `bmd` keys
+  as a closed class, `Resolve` and `Fusion` (`Execute`/`RunScript` marked `@deprecated`), and the
+  block between the `BEGIN GENERATED`/`END GENERATED` markers generated from the `.pyi` by
+  `scripts/gen-types.mjs`. Never edit that block by hand: change the generator, run `make gen-types`.
+  A method the LSP does not know means the `.pyi` changed. Never add a name to `diagnostics.globals`
+  (it mutes typos). Claude Code's LSP client answers no configuration requests, so `.luarc.json` is
+  the only channel; the server picks up file changes within a minute.
+- TypeScript: the `typescript-lsp` plugin (user scope) runs `typescript-language-server`, installed
+  globally under nvm's Node, so it is on PATH only in a shell that sourced nvm. No headless mode;
+  `npx tsc --noEmit` is the batch equivalent.
+- After every edit, read the diagnostics block; a warning or error in a file you touched is part of
+  the task: fix the code, or, when the diagnostic is wrong, fix what the server knows. Never silence
+  one with `---@diagnostic disable`, `diagnostics.globals`, `// @ts-ignore`, `// @ts-expect-error` or
+  `as any` without a comment citing the measured fact that makes it wrong (accepted exceptions: the
+  `claude_diag.lua` warnings named under Tests).
+- Hover a Resolve API method before calling it from Lua; hover or goToDefinition on the SDK's
+  installed `.d.ts` before writing against it; findReferences and incomingCalls before changing an
+  exported symbol; documentSymbol before reading a large file (`claude_diag.lua` is 1050 lines).
+- The LSP never runs code: `fuscript`, `node --test`, `tsc --noEmit` and the grep gates remain the
+  acceptance gates. Its answers are evidence about declared types, not about Resolve's behaviour; the
+  measurements win. `Executable not found in $PATH` means the binary is missing:
+  `brew install lua-language-server`, or `npm i -g typescript-language-server typescript` under nvm.
 
-When and how to use them:
+## Working here
 
-- **After every edit, read the diagnostics block.** A warning or error in a file you touched is part of the task: fix the code, or, when the diagnostic is wrong, fix what the server knows (the types file for Lua, the type for TypeScript). Never silence one with `---@diagnostic disable`, `diagnostics.globals`, `// @ts-ignore`, `// @ts-expect-error` or `as any` without a comment citing the measured fact that makes it wrong. Known and accepted: `scripts/claude_diag.lua` keeps its `need-check-nil` warnings and the undefined `io` at line 538, a deliberate sandbox probe.
-- **Before calling a Resolve API method from Lua,** `hover` the method to see the declared signature. Every API method is declared; `fun(...): any` remains only for `FusionComp` and `GalleryStill` (opaque in the `.pyi`) and the non-prefs `Fusion` methods. A method the LSP does not know means the `.pyi` changed: run `make gen-types`. The LSP knows only what the types file declares; the `.pyi` stays the source of truth.
-- **Before writing TypeScript against the SDK,** `hover` or `goToDefinition` on `McpServer`, `registerTool`, `serveStdio`, `InMemoryTransport` and the zod builders to read the installed v2 `.d.ts` rather than recalling shapes. Context7 explains intent; the `.d.ts` gives the exact signature installed. `hover` an expression to see its inferred type before narrowing it by hand.
-- **Before changing a function or an exported symbol,** `findReferences` and `incomingCalls` to see every caller (`luaString()` will be called from every tool; the bridge's encoder helpers are exercised by `tests/lua/`). `goToDefinition` beats grep for jumping to a definition; `workspaceSymbol` finds where a helper lives.
-- **Before reading a large file,** `documentSymbol` for the outline (the diag script is 1050 lines), then Read only the ranges needed.
-- **What the LSP does not replace.** It never runs code: the `fuscript` tests, `node --test`, `tsc --noEmit` and the grep checks (`os.exit`, `os.execute`, `require`, `fusion:Execute`) remain the acceptance gates. It knows the sandbox only through `.luarc.json` and the types file (`os.execute` is legal to it). Its answers are evidence about declared types, not about Resolve's behaviour; the measurements in `docs/plan.md` win over both.
-- **If the tool answers `Executable not found in $PATH`,** the binary is missing, not the plugin: `brew install lua-language-server`, or `. ~/.nvm/nvm.sh && npm i -g typescript-language-server typescript`.
-
-## Working in this repo
-
-- A user-level PreToolUse hook blocks any Bash command whose text contains the literal `node_modules`, even inside `find -not -path` filters or heredoc bodies. Build the string at run time (`NM="node_""modules"`) or use the Write/Edit tools; do not retry the same command.
-- A user-level PreToolUse hook also rejects any Bash command whose text names the memory directory (`~/.claude/projects/<slug>/memory/`) or contains the word itself, even in a comment or a `cat` ("memory privacy preflight failed"). Read and write memory files with the Read/Write tools only, and build the word at run time when a shell command must mention it.
-- Source nvm before Node tooling: `. ~/.nvm/nvm.sh` then `node`/`npm`/`npx`. The `compdef:153: _comps: assignment to invalid subscript range` line they print is harmless zsh completion noise.
-- `fuscript -l lua <file>` runs the main script in a sandbox environment whose `__index` is `_G`, while `dofile`'d chunks run in `_G` itself; a test harness therefore installs stubs with `rawset(_G, "resolve", stub)` and removes `Resolve`/`bmd.scriptapp` with `rawset` before `dofile`. Plain global assignments in the harness are invisible to the chunk under test. `Resolve()` under `fuscript` returned nil on this Mac (external scripting is off on free), but a harness must still remove it. Absolute paths everywhere; `fuscript` inherits the environment, so `HOME=<dir>` redirects `os.getenv("HOME")`.
-- Decoding a diagnostic or bridge payload from `Fusion.prefs`: keys are serialised in hash order, so match `\bRLBDiag = "([0-9a-f]*)"` (the `Prev` variant cannot match because the next character is `P`), hex-decode to UTF-8 with a non-fatal decoder, then `JSON.parse`. Fusion writes strings with `\"`, `\\`, `\n` and raw tabs and UTF-8.
-- Grep checks for forbidden calls (`os.exit`, `require`, `fusion:Execute`) must skip comment lines (`grep -v '^\s*--'`); a header comment tripped the `os.exit` check once.
-- Foreground `sleep` is blocked in the Bash tool. A long-running observer goes via `nohup zsh script.sh args >/dev/null 2>&1 &` then `disown`, writes its pid to a file, and is killed explicitly at the end.
-- macOS `date` has no `%N` and `awk` has no `strftime`: use zsh `zmodload zsh/datetime; $EPOCHREALTIME` for sub-second stamps and `date -r <epoch> '+%H:%M:%S'` to format one.
-- To compare two `Fusion.prefs` files, strip the `RLB` lines and leading whitespace, `sort`, then `diff`: Fusion serialises sections in hash order and emits trailing commas inconsistently, so a plain diff is noise.
-- Multi-line commit messages: `git commit -q -F - <<'EOF' ... EOF` avoids quoting problems.
-- TypeScript SDK docs and versions: Context7 id `/modelcontextprotocol/typescript-sdk` (its `main` branch) is the current v2; ignore `__branch__v1.x`. Check versions by the v2 package names (`npm view @modelcontextprotocol/server version`); `npm view @modelcontextprotocol/sdk` only shows the legacy 1.x line and misled a previous session.
-- Claude Desktop launch diagnostics: `grep -h '\[MCP Launch\]\|\[UV Discovery\]' ~/Library/Logs/Claude/main*.log` shows how the host resolved and started an extension; installed manifests are at `~/Library/Application Support/Claude/Claude Extensions/<id>/manifest.json`. The host resolves the user's full login PATH for servers but maps bare `node` to its bundled Node.
-- `.claude/settings.json` enables the `mcp-server-dev` plugin for this repo; its `build-mcpb` skill is the packaging reference for Step 4 and `build-mcp-server` the tool-design reference.
-- The Lua and TypeScript language servers are set up and their use is required; see "Language servers: use them" above.
-- Large reference sources (AutoSubs `autosubs_core.lua`, the MCPB schema) go into the session scratchpad via `curl`, then `grep`/`sed -n` the relevant lines; never fetch them whole into context.
-- `fuscript` exits 0 whatever the script does (`os.exit(3)`, `bmd.exit(3)` and an uncaught `error()` all gave 0), so a Lua test runner prints a marker line (`RLB_TESTS_RESULT: PASS|FAIL`) and the caller greps it. Its `os.execute` returns `true` (5.2 style), not `0`; it bundles `dkjson` 2.5, fetched as `rawget(_G, "require")("dkjson")` because `.luarc.json` disables `package` (same for `io`: `rawget(_G, "io")`).
-- Tests load the bridge with `assert(loadfile(path))("RLB_BRIDGE_TESTING")`: a chunk vararg the menu host never passes makes the bridge return its internals instead of starting the loop. The harness replaces `bmd` as well (`rawset(_G, "bmd", stub)`) so `bmd.wait` is a no-op and `bmd.gettime` is a clock the tests advance; `start({resolve, fusion, state_dir, getenv})` injects the rest.
-- LuaLS headless: `lua-language-server --check <dir> --checklevel=Warning --check_format=json --check_out_path=<file>` writes a JSON object keyed by `file://` URI (no file when clean) and exits 1 whenever any diagnostic exists anywhere, so `make lint-lua` greps the report for `bridge/` and `tests/`. To probe the generated types, drop a scratch `.lua` under the repo, run the check, delete it.
-- Editing the bridge: `tests/lua/check_bridge.sh` counts call sites (`:SetPrefs(`, `:SavePrefs(`, `:GetPrefs(` exactly once each) and greps forbidden names on comment-stripped lines, so a new prefs call or a `debug.`/`io.`/`require` reference fails `make test-lua` by design; reach `debug` through `gread` and keep prefs writes inside `set_pref`/`save_prefs`.
-- TypeScript layout facts (Step 3): the package is CJS (no `"type": "module"`), `tsconfig` is `module: NodeNext` in CJS mode, so relative imports end in `.js`, `__dirname` works, and a test file cannot use top-level `await` (use `existsSync` for skip conditions). `@types/node` is pinned to 20 so `tsc` rejects Node 21+ APIs. `import * as z from 'zod/v4'`; `InMemoryTransport` comes from `@modelcontextprotocol/server`, `Client` from `@modelcontextprotocol/client`. `outputSchema` uses `z.looseObject` because the v2 client rejects extra keys in `structuredContent` against a strict `z.object`, and `isError` results skip output validation.
-- Node tests never touch `~/Library` or `/Library`: `RLB_STATE_DIR`, `RLB_PREFS_DIR`, `RLB_DOCS_DIR` and `RLB_SCRIPTS_DIR` point at `tests/helpers/tmp.ts` temp dirs; `tests/helpers/fakeBridge.ts` answers `next.lua` by rewriting a Fusion-format prefs file (tmp + rename) and models the bridge's id de-duplication, single-save stop and failure modes (`silent`, `late`, `wrong_id`, `half_written`, `garbage_hex`, `garbage_json`). Tool tests use a recording `Bridge` stub (`createServer` takes the `Bridge` interface) and assert on the captured Lua.
-- The MCP Inspector CLI does not forward `RLB_*` shell variables to the server it spawns (SDK default environment); a run against the built server uses the production paths and self-installs the scripts. Use the hand-driven stdio pipe with `RLB_STATE_DIR`/`RLB_AUTO_INSTALL=false` when that is unwanted.
-- Extension points (Step 4, for the private build of Step 8; no-ops by default): `main(options)` in `src/main.ts` takes `wrapServer` (applied inside the `serveStdio` factory right after `createServer`; it must return that `McpServer` or a Proxy over it, because `serveStdio` checks `instanceof McpServer` and takes `.server` from it), `onToolFailure` (forwarded to `ServerDeps`; `guard(tool, fn)` in `server.ts` calls it wherever a thrown `BridgeError` becomes an `isError` result, never on success, never for Lua-side failures, never from `resolve_status`; a throw inside it is logged and ignored) and `beforeExit` (awaited on every exit path, the clean shutdown and both crash handlers, behind a ref'd 2 s timer; ref'd on purpose, because after the transport closes an unref'd timer would let Node exit before `exit(code)` runs). `options.runtime` (`env`, `proc`, `transport`, `beforeExitCapMs`) is a test seam only: `tests/main.test.ts` drives `main()` in-process with a fake `EventEmitter` process and the server half of `InMemoryTransport.createLinkedPair()` (`serveStdio` accepts any `Transport`, starts it itself and calls the factory once per connection). Every process listener goes through `runtime.proc`; never register on the real `process` in a test (a `node --test` child's stdin ends at once and would arm a real `process.exit`).
-- `mcpb pack` (2.1.2) walks the directory with the `ignore` package (gitignore syntax) after its built-in excludes (`.git`, `.DS_Store`, `*.log`, `*.map`, `.env*`, `package-lock.json`, `tsconfig.json`, `*.d.ts`, `*.mcpb`) which do **not** cover `node_modules`, `.claude`, `.remember` or `.out`; `.mcpbignore` lists them without trailing slashes (`src/` would not match the directory entry itself and the walker would descend into it). The manifest schema is strict but allows `$schema`. `mcpb pack` needs neither `README.md` nor an icon.
-- Any script or test that must spawn a process (the bundle probe in `tests/check_bundle.sh`, `tests/devRegister.test.ts`) is fine: the no-spawn rule and the `child_process` grep cover `src/` only. macOS shell facts used there: `zipinfo -1` for a bare file list, `stat -f %z` for a size, `/usr/bin/unzip` and `/usr/bin/open` exist.
-- `StdioClientTransport` (`@modelcontextprotocol/client/stdio`) does not inherit the environment: the child gets `getDefaultEnvironment()` (`HOME LOGNAME PATH SHELL TERM USER` on macOS) merged with the `env` option, so a script that spawns the server must pass every `RLB_*` variable explicitly (`scripts/smoke.mjs` does). `Client.callTool` returns `structuredContent` for `isError` results too, validates successful results against the tool's `outputSchema` (a mismatch throws instead of returning), and its `RequestOptions.timeout` defaults to 60 s, the same as the server's render wait, so pass an explicit timeout per call. `close()` ends the child's stdin, then SIGTERM after 2 s, then SIGKILL; both server exit paths release the lock.
-- **The request-slot lock is per request, never held while idle** (changed in Step 5). Measured 2026-09-21 with Claude Desktop 2.2553.1: on install it launched the server six times in about a second (three launch sequences, each an "era probe" sibling process that answers `server/discover` plus the real server, all in Electron utility processes with stdin on `/dev/null` and MCP fed over an internal channel, so the stdin-closed exit path never fires there). The last sequence's probe sibling stays alive and idle for the whole session; with the Step 3 startup lock it owned `~/.davinci-resolve-lua-mcp/lock` for ever and the connected server answered `lock_held` to everything. Now `BridgeClient.request()` takes the lock, waits up to the request's own timeout for a live holder, releases it in `finally`, and `status()` reports the live holder on disk without needing the lock; `main.ts` takes it only for a moment at startup to remove a leftover `next.lua`. Consequences: an idle server never has a lock file (`tests/check_bundle.sh` and `scripts/smoke.mjs` assert it), `make smoke`/`make stop` work alongside the installed extension, and `lock_held` now means a request elsewhere outlasted the wait.
-- Claude Desktop 2.2553.1 passes a `user_config.default` such as `${HOME}/.resolve-lua-bridge` (the default at the time; now `${HOME}/.davinci-resolve-lua-mcp`) to the server **literally** (the MCPB reference says defaults support `${HOME}`; measured 2026-09-21 in `server.log`: `RLB_STATE_DIR="${HOME}/.resolve-lua-bridge" is not an absolute path`). `expandHome()` in `src/config.ts` therefore expands a leading `${HOME}` as well as `~`, so the manifest defaults keep their readable form and `resolve_status` reports no config problem. Claude Desktop also copies the server's stderr into `~/Library/Logs/Claude/main.log` as `[UtilityProcess stderr]` lines and into `mcp-server-DaVinci Resolve (Lua bridge).log`, which records the manager's connection (`initialize`, `tools/list`, era probes, shutdowns) but not the chat's tool calls (measured 2026-09-21: none appeared while tools were in use). To prove a tool ran, decode the last `RLBResp` in `Fusion.prefs`: `grep -o '\bRLBResp = "[^"]*"' Fusion.prefs` gives `<id>:<hex>`; `echo <hex> | xxd -r -p` is the envelope JSON (`op`, `ok`, `ms`, `session`, `result`); the same for `RLBSession`.
-- Installing a rebuilt bundle of the same version: Claude Desktop shows no dialog for an id that is already installed, so the user removes "DaVinci Resolve Lua MCP" under Settings > Extensions, then `open dist/davinci-resolve-lua-mcp.mcpb` (or `make install`) shows the dialog again and Claude Desktop relaunches the server at once. Verify the installed build from `~/Library/Application Support/Claude/extensions-installations.json` (`installedAt`, `hash` = the sha256 of the `.mcpb`), the unpacked copy under `Claude Extensions/local.mcpb.saad-khan.davinci-resolve-lua-mcp/`, and the new `starting` lines (several per launch, one per era-probe sibling) in `~/.davinci-resolve-lua-mcp/server.log`.
-- One-off live probes against the bridge: a scratch `.mjs` under `.out/` (git-ignored, bundle-ignored, resolves the repo's `@modelcontextprotocol/client`) that spawns `server/index.js` with `StdioClientTransport` and calls tools, as `scripts/smoke.mjs` does; a stat loop on `Fusion.prefs` around a call counts the bridge's saves. `node scripts/smoke.mjs` without `--project` is the read-only coexistence check next to the installed extension. Never send mutating Lua to a real project.
-- `node --test` runs the test files concurrently, so a race in the lock or request code can pass `tests/protocol.test.ts` alone and fail `make test`. After touching `protocol.ts` locking, loop the full suite: `for i in 1 2 3 4 5 6 7 8; do node --import tsx --test tests/*.test.ts | grep -q '^✖' && echo FAIL; done`. In the Bash tool (zsh), `${pipestatus[1]}` is the exit code of a pipeline's first command (the `| grep -v compdef` habit hides it otherwise).
+- Multi-line commit messages: `git commit -q -F - <<'EOF' ... EOF`.
+- macOS `date` has no `%N` and `awk` no `strftime`: use zsh `zmodload zsh/datetime; $EPOCHREALTIME`
+  for sub-second stamps and `date -r <epoch> '+%H:%M:%S'` to format one.
+- Decoding a payload from `Fusion.prefs`: keys are serialised in hash order, so match
+  `\bRLBResp = "([^"]*)"` (the `Prev` variant of `RLBDiag` cannot match because the next character is
+  `P`); the value is `<id>:<hex>`, and `echo <hex> | xxd -r -p` is the envelope JSON (`op`, `ok`,
+  `ms`, `session`, `result`). Fusion writes strings with `\"`, `\\`, `\n` and raw tabs and UTF-8. To
+  compare two prefs files, strip the `RLB` lines and leading whitespace, `sort`, then `diff`.
+- Large reference sources go into the session scratchpad via `curl`, then grep the relevant lines.
+- `.claude/settings.json` enables the `mcp-server-dev` plugin (its `build-mcpb` skill is the packaging
+  reference and `build-mcp-server` the tool-design reference) and `lua-lsp`; the repo-local
+  `create-readme` skill under `.claude/skills/` wrote the README.
+- One-off live probes against the bridge: a scratch `.mjs` under `.out/` (git-ignored,
+  bundle-ignored) that spawns `server/index.js` with `StdioClientTransport` and calls tools, as
+  `scripts/smoke.mjs` does; a stat loop on `Fusion.prefs` around a call counts the bridge's saves.
+  Never send mutating Lua to a real project.

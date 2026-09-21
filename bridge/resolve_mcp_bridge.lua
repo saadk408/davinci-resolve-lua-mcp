@@ -390,7 +390,7 @@ local function set_pref(st, key, value)
 end
 
 -- SavePrefs returns nil on success; a throw or an explicit false is a failure. Resolve may be
--- writing the file itself, so retry a few times (research 3.5c).
+-- writing the file itself, so retry a few times.
 local function save_prefs(st)
   local F = st.fusion
   local t0 = now()
