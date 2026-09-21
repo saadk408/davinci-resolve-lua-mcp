@@ -48,7 +48,7 @@ bridge/resolve_lua_bridge.lua (Scripts-menu Lua state, holds live `resolve`)
       no fusion: calls while idle; stop = a request with op="stop"; takeover = session mismatch
 ```
 
-Layout: `bridge/` (one dependency-free Lua file, under 600 lines), `server/` (Python package `resolve_lua_bridge`: `server.py`, `protocol.py`, `tools.py`, `lua_snippets.py`, `docs_search.py`), `scripts/claude_diag.lua`, `tests/` (pytest with a fake bridge thread that writes a fake `Fusion.prefs`; Lua tests under `fuscript`), `install.sh`, `uninstall.sh`, `Makefile`, `README.md`.
+Layout: `bridge/` (one dependency-free Lua file, under 600 lines), `server/` (Python package `resolve_lua_bridge`: `server.py`, `protocol.py`, `tools.py` with 14 tools, `lua_snippets.py`, `docs_search.py`), `scripts/claude_diag.lua`, `tests/` (pytest with a fake bridge thread that writes a fake `Fusion.prefs`; Lua tests under `fuscript`), `install.sh`, `uninstall.sh`, `Makefile`, `README.md`.
 
 Runtime state: `~/.resolve-lua-bridge/` (0700) holding `next.lua`, `next.lua.tmp`, `lock` (flock), `server.log`. No queue subdirectories, no heartbeat file, no stop file.
 
@@ -77,6 +77,9 @@ From the spec, plus rules learned in Step 0. Not negotiable without the user's s
 - The bridge never deletes files (it cannot), never calls `os.exit`, never blocks longer than one request, and stays dependency-free.
 - Responses are capped (192 KB of JSON before hex) because every `SavePrefs` rewrites a file Resolve loads at startup.
 - Commit after each step with a clear message.
+- **Every MCP tool declares `title` and `ToolAnnotations`**: read-only tools `read_only_hint=True`; `run_lua` and `delete_markers` `destructive_hint=True`; all `open_world_hint=False`. Descriptions describe; cross-tool guidance lives in the server `instructions` string, never in descriptions.
+- **Every string a tool embeds in a Lua chunk goes through the one `lua_string()` escaping helper.** Tool inputs are untrusted even though Claude sends them. Enums are `Literal`s, ints are bounded, list tools take a `limit`.
+- Framework is the official `mcp>=2.2,<3` (`MCPServer`), not jlowin's `fastmcp`; see `docs/plan-review-2026-09.md` § J for why.
 
 ## Lua conventions the bridge and tools must respect
 
