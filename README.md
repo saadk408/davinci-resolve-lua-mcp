@@ -28,13 +28,19 @@ DaVinci Resolve 21.1 moved Python scripting and the external scripting API to th
 
 ## Install
 
-1. Download the latest `davinci-resolve-lua-mcp.mcpb` from the [Releases page](https://github.com/saadk408/davinci-resolve-lua-mcp/releases/latest).
+1. Download [`davinci-resolve-lua-mcp.mcpb`](https://github.com/saadk408/davinci-resolve-lua-mcp/releases/latest/download/davinci-resolve-lua-mcp.mcpb) (the latest release; the release notes and the SHA-256 are on the [Releases page](https://github.com/saadk408/davinci-resolve-lua-mcp/releases/latest)).
 2. Double-click the file, or drag it onto the Claude Desktop window. Claude Desktop shows the extension's details and four settings; keep the defaults and click **Install**.
 3. In Resolve, open a project and click `Workspace > Scripts > resolve_mcp_bridge`. The extension put that script there when it first started; Resolve's Console stays silent, which is expected.
    - The script stops when Resolve quits. Click it again after every Resolve launch, before using the tools.
 4. Ask Claude "Are you connected to DaVinci Resolve?".
 
-To update, download the new `.mcpb` and open it again; extensions installed from a file do not update on their own. To build the bundle yourself, see [Development](#development).
+From a terminal instead, which downloads the file and opens the same install dialog:
+
+```sh
+curl -fsSLo ~/Downloads/davinci-resolve-lua-mcp.mcpb https://github.com/saadk408/davinci-resolve-lua-mcp/releases/latest/download/davinci-resolve-lua-mcp.mcpb && open ~/Downloads/davinci-resolve-lua-mcp.mcpb
+```
+
+To update, download again from the same link (or rerun the command) and open the file; extensions installed from a file do not update on their own. To build the bundle yourself, see [Development](#development).
 
 ## Start and stop the bridge
 
