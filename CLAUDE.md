@@ -51,8 +51,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   Claude Desktop as `local.mcpb.saad-khan.resolve-lua-bridge` and answered the user's project-overview
   question through `get_project_info`, `list_timelines` and `list_media_pool_clips`. Two host findings
   changed the server: the request-slot lock is now per request (an idle server never holds it) and the
-  config expands `${HOME}` (see "Working in this repo"). Not measured: the takeover (second click) and
-  the dirty-project `open_project` probe. Next is Step 6 (README), then Step 7, then Step 8 separately.
+  config expands `${HOME}` (see "Working in this repo"). Also measured: a second click of the script
+  takes over cleanly (the old loop exits on the first request for the newer session) and, with live
+  save on, `open_project` with `save_current=false` neither prompts nor loses work. Next is Step 6
+  (README), then Step 7, then Step 8 separately.
 - Git repository on `main`; `.gitignore` covers `.DS_Store`, `.remember/`, `.venv/`, `node_modules/`, `dist/`, `server/`, `*.mcpb`, `cert.pem`, `key.pem`, `.env`.
 
 ## Hard gates, in order
