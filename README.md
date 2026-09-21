@@ -4,10 +4,10 @@
 
 ![Claude Desktop describing the open project next to the same project in DaVinci Resolve 21.1 free edition](docs/images/hero-image.png)
 
-DaVinci Resolve 21.1 moved Python scripting and the external scripting API to the Studio edition (research rows 2.1-2.3), and Blackmagic's own MCP server ships with Studio only (2.4). One door is still open on the free edition: `Workspace > Scripts` lists and runs Lua files (3.1-3.3). This project puts a small Lua script there. Launched once per Resolve session, it holds the live `resolve` object and executes Lua on behalf of an MCP server that Claude Desktop runs as an extension. Requests travel as a file, answers come back through Fusion's preferences file, and nothing leaves the Mac.
+DaVinci Resolve 21.1 moved Python scripting and the external scripting API to the Studio edition, and Blackmagic's own MCP server ships with Studio only. One door is still open on the free edition: `Workspace > Scripts` lists and runs Lua files. This project puts a small Lua script there. Launched once per Resolve session, it holds the live `resolve` object and executes Lua on behalf of an MCP server that Claude Desktop runs as an extension. Requests travel as a file, answers come back through Fusion's preferences file, and nothing leaves the Mac. The measurements and sources behind every design choice are in the `docs/` folder of the source repository.
 
 > [!NOTE]
-> Nothing here unlocks Studio features: the bridge uses the free edition's own Lua scripting API. Studio 21.1 users already have Blackmagic's native MCP server (2.4).
+> Nothing here unlocks Studio features: the bridge uses the free edition's own Lua scripting API. Studio 21.1 users already have Blackmagic's native MCP server.
 
 ## Features
 
@@ -20,14 +20,14 @@ DaVinci Resolve 21.1 moved Python scripting and the external scripting API to th
 ## Requirements
 
 - macOS. Apple Silicon is the only hardware measured.
-- DaVinci Resolve **21.1 free edition** (build 21.1.0.17 is the one measured). Studio is not needed and not targeted.
+- DaVinci Resolve **21.1 free edition** (build 21.1.0.17 is the one measured). Studio is not needed and not targeted. Blackmagic documents neither this Lua host nor its sandbox, so a point release can change what works.
 - Claude Desktop. It ships the Node runtime the server needs (Node 20 or newer); nothing else is installed.
 - A project open in Resolve while you use the tools.
 
 ## Install
 
 1. Get `davinci-resolve-lua-mcp.mcpb`. From a checkout, `make bundle` writes it to `dist/` (see [Development](#development)); otherwise use the bundle you were given.
-2. Open the `.mcpb` file (double-click, or `open dist/davinci-resolve-lua-mcp.mcpb`), or in Claude Desktop go to Settings > Extensions > Advanced settings > Install Extension... and pick the file (13.10). Accept the default settings; they are listed under [Settings](#settings).
+2. Open the `.mcpb` file (double-click, or `open dist/davinci-resolve-lua-mcp.mcpb`), or in Claude Desktop go to Settings > Extensions > Advanced settings > Install Extension... and pick the file. Accept the default settings; they are listed under [Settings](#settings).
 3. Claude Desktop launches the server. On its first launch the server copies `resolve_mcp_bridge.lua` and `claude_diag.lua` into `~/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Utility/`, the only Resolve folder it ever writes. Resolve lists them under `Workspace > Scripts` without a restart.
 4. Start the bridge (next section) and ask Claude "Are you connected to DaVinci Resolve?".
 
@@ -37,15 +37,15 @@ Claude Desktop shows no dialog when you open a bundle whose extension id is alre
 
 1. In Resolve, open a project.
 2. Click `Workspace > Scripts > resolve_mcp_bridge`.
-3. Nothing appears in Resolve's Console. That is expected: the free edition mutes `print` in menu scripts (3.1, 3.2). The script is now looping in the background and Resolve stays responsive.
+3. Nothing appears in Resolve's Console. That is expected: the free edition mutes `print` in menu scripts. The script is now looping in the background and Resolve stays responsive.
 4. In Claude Desktop, ask for the bridge status or just start working. `resolve_status` reports `alive: true`, the product, version, edition, page and open project.
 
 <img src="docs/images/scripts-menu.png" width="600" alt="Resolve's Workspace > Scripts menu listing claude_diag and resolve_mcp_bridge">
 
 > [!IMPORTANT]
-> The script lives and dies with Resolve. After every Resolve launch, click `Workspace > Scripts > resolve_mcp_bridge` again before using the tools. The bridge is never started automatically, by design: a loop started through `fusion:Execute` holds Fusion's shared script executor for the whole session (3.5), so the Scripts menu is the only supported launch.
+> The script lives and dies with Resolve. After every Resolve launch, click `Workspace > Scripts > resolve_mcp_bridge` again before using the tools. The bridge is never started automatically, by design: a loop started through `fusion:Execute` holds Fusion's shared script executor for the whole session, so the Scripts menu is the only supported launch.
 
-To stop it, ask Claude to stop the bridge (`stop_bridge`), or quit Resolve. Clicking the script a second time while a loop is running is harmless: the new loop takes over and the old one exits on the first request addressed to the newer session (measured in Step 5).
+To stop it, ask Claude to stop the bridge (`stop_bridge`), or quit Resolve. Clicking the script a second time while a loop is running is harmless: the new loop takes over and the old one exits on the first request addressed to the newer session.
 
 ## Example prompts
 
@@ -94,7 +94,7 @@ The chunk runs inside Resolve's Scripts-menu Lua state (LuaJIT, Lua 5.1) with th
 - Page names for `OpenPage` are lowercase (`"edit"`, `"color"`, `"deliver"`).
 - `return` a value to get it back as JSON. Only the first return value is sent. `print` output is invisible in Resolve but comes back in `prints` (capped at 200 lines / 16 KB).
 - Look the method up with `scripting_api_docs` first, and avoid the deprecated forms Blackmagic's shipped examples still use: `GetSetting`/`SetSetting` (use `GetSettings()`/`SetSettings({})`), `GetItemsInTrack` (use `GetItemListInTrack`), index-based render-job calls (ids are strings) and single-argument `GetClipProperty`.
-- `io`, `os.execute`, `os.remove`, `require`, `package`, `ffi` and `debug` do not exist in this state (3.1, 3.4, measured); errors carry the message only, without a traceback.
+- `io`, `os.execute`, `os.remove`, `require`, `package`, `ffi` and `debug` do not exist in this state; errors carry the message only, without a traceback.
 
 ```lua
 local project = resolve:GetProjectManager():GetCurrentProject()
@@ -143,53 +143,21 @@ The settings map onto the first four variables; the rest have no setting. A bad 
 
 </details>
 
-## How it works
-
-Numbers in parentheses such as (3.4) are rows of [`docs/research-2026-09.md`](docs/research-2026-09.md) in the source repository, the evidence behind each design choice; "measured" refers to the on-machine diagnostic in [`docs/diagnostic-2026-09.md`](docs/diagnostic-2026-09.md) and the smoke run recorded in [`docs/plan.md`](docs/plan.md). The bundle ships this README without those files or the images under `docs/images/`.
-
-```
-Claude Desktop ──stdio──► davinci-resolve-lua-mcp  (node server/index.js, inside the extension)
-      │ writes  ~/.davinci-resolve-lua-mcp/next.lua   (tmp + rename)
-      │         return { v = 1, id, session, op = "run", ts, code = [==[ ... ]==] }
-      │ polls   ~/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Profiles/*/Fusion.prefs
-      │         for  RLBResp = "<id>:<hex-encoded JSON>"
-      │ deletes next.lua once the answer is in
-      ▼
-resolve_mcp_bridge.lua  (a Workspace > Scripts script that holds the live `resolve`)
-      every 50 ms: bmd.fileexists(next.lua) → loadfile → a new id addressed to this session?
-                   → loadstring + setfenv + xpcall, prints captured
-                   → fusion:SetPrefs("Global.ResolveLuaBridge.RLBResp", ...) + fusion:SavePrefs()
-```
-
-Design choices and their reasons:
-
-- **A Lua script from the Scripts menu, not Python and not the Console.** Free 21.1 removed Python and external scripting (2.1-2.3); the Scripts menu still lists and runs `.lua` files and hands them the live `resolve` object (3.1-3.3). The Console is a separate Lua state from the menu host (3.3, measured), and a loop started through `fusion:Execute` holds Fusion's shared script executor (3.5), so the loop runs only from the Scripts menu.
-- **A request file in, Fusion preferences out, no sockets.** The menu-script state has no `io`, `ffi`, `os.execute`, `require` or `package` (3.1, 3.4, measured), so the script can neither open sockets nor write files. It can still `loadfile` a request and call `fusion:SetPrefs` + `fusion:SavePrefs` (4.2), the same channel AutoSubs runs in production on free 21.1 (3.4, 3.5, 6.5). The server polls the profile's `Fusion.prefs` (1.9).
-- **Hex-encoded responses.** `Fusion.prefs` is Lua-table text with Lua string escaping (4.3); hex keeps every byte of JSON intact and lets the server match `RLBResp = "` with a word-boundary regex.
-- **The server deletes the request file.** Lua has no `os.remove` or `os.rename` in this state (10.3); the bridge only remembers the last id it answered.
-- **No heartbeat, no idle prefs writes.** A periodic `SetPrefs` fired Fusion's prefs-changed handler continuously and one landing during shutdown crashed Resolve for AutoSubs (3.5). The bridge writes prefs once at start, once per answered request and once on a clean stop; liveness is inferred from the session record (`RLBSession`), Resolve's pid and a `ping`.
-- **Responses capped at 64 KB by default (192 KB ceiling), lists paginated.** Every `SavePrefs` rewrites a file Resolve parses at startup. The saves themselves take 1 to 6 ms even at 512 KB and are write-then-rename (measured), so the cap is about file size, not latency.
-- **A 50 ms poll inside Resolve.** Measured: a 30 s loop of `bmd.wait(0.05)` plus a file-exists check per tick kept the UI responsive (worst tick 53 ms), and the prefs keys survive Resolve's own saves, a quit and a relaunch.
-- **Node and an MCPB bundle, TypeScript on the v2 MCP SDK.** Claude Desktop ships Node and the MCPB tooling recommends it over Python (13.1, 13.6, 13.11); the server uses `@modelcontextprotocol/server` 2.x, the stable line since the 2026-07-28 spec (13.8), bundled by esbuild into one file.
-- **Self-install into `Scripts/Utility` only.** The server writes the two Lua files there and nowhere else; it never creates Resolve's folders. A copy under `Scripts/Deliver` would also be offered as a render start/end script in the Deliver page's render settings, so the installer never touches that folder.
-
-All of this is measured on one build (21.1.0.17) of an undocumented host: Blackmagic documents neither the sandbox nor the Lua libraries (3.6), and a point release can change them. The design is supported until it is not.
-
 ## Troubleshooting
 
 - **The script is missing from `Workspace > Scripts`.** Ask Claude for `resolve_status` and read `bridge_script.outcome`: `installed`, `updated` or `up_to_date` mean the file is in the scripts folder, so reopen the menu (Resolve lists a new file without a restart); `skipped_auto_install_off` means the setting is off, copy `bridge/resolve_mcp_bridge.lua` and `scripts/claude_diag.lua` there yourself; `scripts_dir_missing` means the folder does not exist, launch Resolve once so it creates it, or fix the scripts-folder setting (the server never creates Resolve folders); `permission_denied` and `error` carry the operating-system message. A state directory path that cannot be stamped into the script (it contains `]==]`, a double quote, a backslash or a newline, or starts with `@@`) turns auto-install off and is named in `config_problems`; `state_dir_unstampable` is the same problem when the copy step reports it itself. The same outcome is in the server log named below.
-- **Nothing appears in the Console when I click the script.** Expected. `print` is muted in menu scripts on free 21.1 (3.1, 3.2). Check `resolve_status` instead.
+- **Nothing appears in the Console when I click the script.** Expected. `print` is muted in menu scripts on free 21.1. Check `resolve_status` instead.
 - **I copied the script into `Scripts/Deliver`.** Resolve also offers that folder's scripts as selectable render start/end scripts in the Deliver page, which is not where the bridge belongs. Delete the copy and keep the script in `Scripts/Utility` only.
 - **`Fusion.prefs` is not updating.** The bridge writes preferences only when it answers a request, so first check that the loop is running (`resolve_status`). The newest `Fusion.prefs` under the Profiles folder is the one read, whatever the profile is called; set `RLB_PREFS_DIR` only if that folder is somewhere else. A save that fails while Resolve is writing the file is attempted up to five times, and a failed start save is retried once a second until it lands.
 - **`resolve_status` says `prefs_missing`.** No `Fusion.prefs` exists under the profiles folder. Launch Resolve at least once on this Mac, or point `RLB_PREFS_DIR` at its `Fusion/Profiles` folder.
 - **A request is stuck, or a tool times out.** The bridge is busy on a long synchronous call or a modal dialog it cannot answer: wait for Resolve to finish, then retry. Requests older than 120 s are refused by the bridge and the server removes `next.lua` after a timeout, so nothing needs clearing by hand. For slow calls, raise the default timeout (up to 300 s) or pass `timeout_s` to `run_lua`.
 - **`resolve_status` says `lock_held`.** Another server kept the request slot for longer than the timeout: a second Claude Desktop entry, `make smoke`, or a dev-register loop. Stop it, or point `RLB_STATE_DIR` elsewhere. Remove `~/.davinci-resolve-lua-mcp/lock` by hand only if the pid it names is not a server.
-- **Resolve was restarted mid-session.** `resolve_status` says `resolve_gone` (the recorded pid is dead) or `no_reply`. The session record survives the restart on purpose, and there is no heartbeat (3.5), so nothing restarts the loop for you: click `Workspace > Scripts > resolve_mcp_bridge` again.
+- **Resolve was restarted mid-session.** `resolve_status` says `resolve_gone` (the recorded pid is dead) or `no_reply`. The session record survives the restart on purpose, and there is no heartbeat, so nothing restarts the loop for you: click `Workspace > Scripts > resolve_mcp_bridge` again.
 - **I double-clicked the script.** Harmless. The newer loop takes over; the older one exits on the first request it sees for the newer session and never touches preferences again.
 - **The response says `truncated: true`.** The JSON exceeded the cap (64 KB by default). For `run_lua`, `result_preview` holds the start of it; a purpose-built tool over the cap answers with an error that names the cap and asks for a smaller `limit` or a different `offset`. Use `offset` and `limit` on the list tools, return less from your Lua, or raise `RLB_MAX_RESPONSE_KB` (192 KB at most).
 - **Reinstalling shows no dialog.** Remove the extension under Settings > Extensions, then open the `.mcpb` again; Claude Desktop relaunches the server at once.
 - **A tool answers `bad_response`.** The installed script and the server disagree on the protocol, usually after an upgrade of one but not the other. Restart Claude Desktop so the server reinstalls the script, then relaunch it from the Scripts menu.
-- **Where the logs are.** Claude Desktop keeps the server's stderr in `~/Library/Logs/Claude/mcp-server-DaVinci Resolve Lua MCP.log` (13.6, 8.1), which records the connection, not the chat's tool calls (measured); the server's own log is `~/.davinci-resolve-lua-mcp/server.log` (truncated at 5 MB; the path is also in `resolve_status`); the installed extension lives under `~/Library/Application Support/Claude/Claude Extensions/local.mcpb.saad-khan.davinci-resolve-lua-mcp/`. The proof that a call ran is the last answer in `Fusion.prefs`:
+- **Where the logs are.** Claude Desktop keeps the server's stderr in `~/Library/Logs/Claude/mcp-server-DaVinci Resolve Lua MCP.log`, which records the connection, not the chat's tool calls; the server's own log is `~/.davinci-resolve-lua-mcp/server.log` (truncated at 5 MB; the path is also in `resolve_status`); the installed extension lives under `~/Library/Application Support/Claude/Claude Extensions/local.mcpb.saad-khan.davinci-resolve-lua-mcp/`. The proof that a call ran is the last answer in `Fusion.prefs`:
 
   ```sh
   PREFS=~/Library/Application\ Support/Blackmagic\ Design/DaVinci\ Resolve/Fusion/Profiles/Default/Fusion.prefs
@@ -202,7 +170,7 @@ All of this is measured on one build (21.1.0.17) of an undocumented host: Blackm
 > Anything that can write one file on this Mac can run Lua inside Resolve with your privileges. Read a `run_lua` chunk before you approve it.
 
 - The state directory is created with mode 0700, and the request slot is a single file in it. Any local process that can write `~/.davinci-resolve-lua-mcp/next.lua` while the bridge is running runs Lua inside Resolve as you; the state directory's permissions are the whole boundary.
-- The last response persists hex-encoded in `Fusion.prefs` until the next one overwrites it. On the measured Mac that file has mode 0666 (1.9), so any local account can read the previous answer. A clean stop marks the session record `stopped` and replaces the last answer with the stop acknowledgement.
+- The last response persists hex-encoded in `Fusion.prefs` until the next one overwrites it. On the measured Mac that file has mode 0666, so any local account can read the previous answer. A clean stop marks the session record `stopped` and replaces the last answer with the stop acknowledgement.
 - The extension runs with your user's privileges, inside Claude Desktop's process model, with no sandbox of its own. It writes only its state directory and the two Lua files in Resolve's user scripts folder.
 - `run_lua` executes whatever Lua Claude writes. `delete_markers` asks for `confirm`; `run_lua` takes no confirmation, is the general escape hatch, and is marked destructive for that reason.
 - No network: the server opens no sockets and makes no requests. Files in, preferences out.

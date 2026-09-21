@@ -62,13 +62,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   Rationale, trademark note and the migration record are in `docs/plan-review-2026-09.md` § R. Reinstalled and
   smoke-tested (24 PASS) under the new name the same day. `docs/diagnostic-2026-09.md`,
   `docs/research-2026-09.md` and plan-review §§ A-Q predate the rename and keep the old names on purpose.
-- **Step 6 is done (2026-09-21).** `README.md` (260 lines, written with the repository's `create-readme`
-  skill): tagline and why with research-row citations, features, requirements, install, start and stop,
+- **Step 6 is done (2026-09-21).** `README.md` (228 lines, written with the repository's `create-readme`
+  skill): tagline and why, features, requirements, install, start and stop,
   example prompts, the 15-tool table with a `run_lua` guide, the four settings and the eight `RLB_*`
-  variables, "How it works" (the diagram plus nine design choices, each with its rows or measurement),
-  13 troubleshooting entries, security, uninstall, development (`make` targets, the dev-register loop, the
-  smoke caveat), a short acknowledgments list and the § R trademark line. It ships in the bundle: `make bundle` now packs 7
-  files (216 KB packed, 975 KB unpacked; `tests/check_bundle.sh` has listed `README.md` and `LICENSE` as
+  variables, 13 troubleshooting entries, security, uninstall, development (`make` targets, the dev-register loop, the
+  smoke caveat), a short acknowledgments list and the § R trademark line. The inline research-row citations and the
+  "How it works" section (diagram, design choices) were removed the same day on the user's request (confusing
+  to a reader); one sentence in the intro points to `docs/` for the evidence, and definition-of-done item 6
+  is to be read that way in Step 7. It ships in the bundle: `make bundle` now packs 7
+  files (215 KB packed, 971 KB unpacked; `tests/check_bundle.sh` has listed `README.md` and `LICENSE` as
   optional since Step 4). Same-day follow-up: `LICENSE` (standard MIT text, 2026, Saad Khan) added and shipped
   in the bundle; three screenshots under `docs/images/` (hero, Scripts menu, extension settings; `.mcpbignore`
   excludes `docs`, so the image links are dead inside the unpacked extension) wired into the README. The two
@@ -135,7 +137,7 @@ Real targets (`Makefile`; the Node targets source nvm themselves):
 - Syntax check of one Lua file: `"/Applications/DaVinci Resolve/DaVinci Resolve.app/Contents/Libraries/Fusion/fuscript" -l lua -x 'assert(loadfile("<abs>/file.lua")); print("ok")'` (absolute paths; the tool prints a two-line banner on stdout, filter it with `grep -v -e '^DaVinci Resolve Script' -e '^Copyright'`).
 - Drive the built server by hand: pipe JSON-RPC lines (`initialize`, `notifications/initialized`, `tools/list`, `tools/call`) into `RLB_STATE_DIR=<tmp> RLB_AUTO_INSTALL=false node server/index.js`; the answers come back one per line on stdout, the log on stderr. In-flight calls finish after stdin closes (5 s grace).
 
-- `make bundle`: `make build`, `npx @anthropic-ai/mcpb validate manifest.json`, `mcpb pack . dist/davinci-resolve-lua-mcp.mcpb` (what `.mcpbignore` leaves in: `manifest.json`, `package.json`, `server/index.js`, `bridge/resolve_mcp_bridge.lua`, `scripts/claude_diag.lua`, `README.md`, `LICENSE`; 7 files, 216 KB packed, 975 KB unpacked since Step 6), `mcpb info`, then `tests/check_bundle.sh` (the `zipinfo -1` file list against an allowlist, size under 2 MB, `unzip` into a temp dir and a stdio `initialize`/`tools/list` probe of the unpacked `server/index.js` under a temp `RLB_STATE_DIR` with `RLB_AUTO_INSTALL=false`, so nothing outside the temp dir is touched). Two packs give the same file list but different bytes (the zip mtime is the pack time).
+- `make bundle`: `make build`, `npx @anthropic-ai/mcpb validate manifest.json`, `mcpb pack . dist/davinci-resolve-lua-mcp.mcpb` (what `.mcpbignore` leaves in: `manifest.json`, `package.json`, `server/index.js`, `bridge/resolve_mcp_bridge.lua`, `scripts/claude_diag.lua`, `README.md`, `LICENSE`; 7 files, 215 KB packed, 971 KB unpacked since Step 6), `mcpb info`, then `tests/check_bundle.sh` (the `zipinfo -1` file list against an allowlist, size under 2 MB, `unzip` into a temp dir and a stdio `initialize`/`tools/list` probe of the unpacked `server/index.js` under a temp `RLB_STATE_DIR` with `RLB_AUTO_INSTALL=false`, so nothing outside the temp dir is touched). Two packs give the same file list but different bytes (the zip mtime is the pack time).
 - `make install`: `make bundle`, then `open dist/davinci-resolve-lua-mcp.mcpb` so Claude Desktop shows its install dialog. The click is the user's (Step 5); never run it unasked.
 - `make sign`: optional `mcpb sign --self-signed` + `mcpb verify` (writes `cert.pem`/`key.pem`, git-ignored and bundle-ignored).
 - `make dev-register` / `make dev-unregister`: `scripts/dev-register.mjs` merges (or removes) a `davinci-resolve-lua-mcp-dev` entry in `~/Library/Application Support/Claude/claude_desktop_config.json` that runs `<repo>/server/index.js` with the current Node binary (`process.execPath`); backs the file up to `<file>.bak-<stamp>` first, keeps every other key, writes tmp + rename with mode 0600, refuses an unparsable file. Flags: `--config <path>`, `--name <key>`, `--env <path>` (`RLB_*` lines of a `KEY=VALUE` file become the entry's env; default `<repo>/.env`), `--dry-run`, `--remove`. It changes the user's Claude Desktop config: run it against the real file only when the user asks; the tests use temp files.
