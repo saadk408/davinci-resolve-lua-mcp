@@ -2,6 +2,8 @@
 
 *Control the free edition of DaVinci Resolve 21.1 from Claude through a Lua script that runs inside Resolve. macOS, no Studio licence, no network.*
 
+[![tests](https://github.com/saadk408/davinci-resolve-lua-mcp/actions/workflows/tests.yml/badge.svg)](https://github.com/saadk408/davinci-resolve-lua-mcp/actions/workflows/tests.yml) [![Release](https://img.shields.io/github/v/release/saadk408/davinci-resolve-lua-mcp)](https://github.com/saadk408/davinci-resolve-lua-mcp/releases/latest) [![License: MIT](https://img.shields.io/github/license/saadk408/davinci-resolve-lua-mcp)](LICENSE) ![macOS](https://img.shields.io/badge/platform-macOS-lightgrey) ![DaVinci Resolve 21.1 free edition](https://img.shields.io/badge/DaVinci_Resolve-21.1_free-blue)
+
 ![Claude Desktop describing the open project next to the same project in DaVinci Resolve 21.1 free edition](docs/images/hero-image.png)
 
 DaVinci Resolve 21.1 moved Python scripting and the external scripting API to the Studio edition, and Blackmagic's own MCP server ships with Studio only. One door is still open on the free edition: `Workspace > Scripts` lists and runs Lua files. This project puts a small Lua script there. Launched once per Resolve session, it holds the live `resolve` object and executes Lua on behalf of an MCP server that Claude Desktop runs as an extension. Requests travel as a file, answers come back through Fusion's preferences file, and nothing leaves the Mac.
@@ -26,7 +28,7 @@ DaVinci Resolve 21.1 moved Python scripting and the external scripting API to th
 
 ## Install
 
-1. Download the latest `davinci-resolve-lua-mcp.mcpb` from this repository's Releases page.
+1. Download the latest `davinci-resolve-lua-mcp.mcpb` from the [Releases page](https://github.com/saadk408/davinci-resolve-lua-mcp/releases/latest).
 2. Double-click the file, or drag it onto the Claude Desktop window. Claude Desktop shows the extension's details and four settings; keep the defaults and click **Install**.
 3. In Resolve, open a project and click `Workspace > Scripts > resolve_mcp_bridge`. The extension put that script there when it first started; Resolve's Console stays silent, which is expected.
    - The script stops when Resolve quits. Click it again after every Resolve launch, before using the tools.
@@ -189,7 +191,7 @@ The `Global.ResolveLuaBridge.*` keys stay in `Fusion.prefs` (under 2 KB after a 
 Prerequisites: Node 20 or newer (the Makefile sources `~/.nvm/nvm.sh`), npm, a DaVinci Resolve installation (the Lua tests run under its bundled `fuscript` interpreter at `/Applications/DaVinci Resolve/DaVinci Resolve.app/Contents/Libraries/Fusion/fuscript`), and optionally `lua-language-server` for `make lint-lua`.
 
 ```sh
-git clone <this repository> davinci-resolve-lua-mcp
+git clone https://github.com/saadk408/davinci-resolve-lua-mcp.git
 cd davinci-resolve-lua-mcp
 npm install
 make test      # Lua checks under fuscript + the Node suite

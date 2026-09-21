@@ -1,5 +1,5 @@
 {
-  "$schema": "https://raw.githubusercontent.com/modelcontextprotocol/mcpb/main/dist/manifest.schema.json",
+  "$schema": "https://raw.githubusercontent.com/modelcontextprotocol/mcpb/main/schemas/mcpb-manifest-v0.4.schema.json",
   "manifest_version": "0.4",
   "name": "davinci-resolve-lua-mcp",
   "display_name": "DaVinci Resolve Lua MCP",
@@ -7,9 +7,14 @@
   "description": "Control the free edition of DaVinci Resolve 21.1 from Claude through a Lua script that runs inside Resolve. macOS, no Studio licence, no network.",
   "long_description": "DaVinci Resolve 21.1 removed Python and external scripting from the free edition. This extension talks to Resolve through the one door left: a Lua script launched from Workspace > Scripts inside Resolve, which holds the live `resolve` object and executes Lua on behalf of the server. The server writes request files, the script answers through Fusion preferences; no network is involved. On first run the server copies its two Lua scripts into Resolve's user Utility scripts folder. Then, in Resolve, open a project and run Workspace > Scripts > resolve_mcp_bridge.",
   "author": {
-    "name": "Saad Khan"
+    "name": "Saad Khan",
+    "url": "https://github.com/saadk408"
   },
   "license": "MIT",
+  "homepage": "https://github.com/saadk408/davinci-resolve-lua-mcp",
+  "documentation": "https://github.com/saadk408/davinci-resolve-lua-mcp#readme",
+  "support": "https://github.com/saadk408/davinci-resolve-lua-mcp/issues",
+  "repository": { "type": "git", "url": "https://github.com/saadk408/davinci-resolve-lua-mcp" },
   "icon": "icon.png",
   "icons": [
     { "src": "icon.png", "size": "512x512" }
