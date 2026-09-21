@@ -14,3 +14,6 @@ server/
 cert.pem
 key.pem
 .env
+# Screen recordings for the README are GitHub-hosted attachments, never committed
+docs/images/*.mp4
+docs/images/*.mov

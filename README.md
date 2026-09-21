@@ -2,6 +2,8 @@
 
 *Control the free edition of DaVinci Resolve 21.1 from Claude through a Lua script that runs inside Resolve. macOS, no Studio licence, no network.*
 
+![Claude Desktop describing the open project next to the same project in DaVinci Resolve 21.1 free edition](docs/images/hero-image.png)
+
 DaVinci Resolve 21.1 moved Python scripting and the external scripting API to the Studio edition (research rows 2.1-2.3), and Blackmagic's own MCP server ships with Studio only (2.4). One door is still open on the free edition: `Workspace > Scripts` lists and runs Lua files (3.1-3.3). This project puts a small Lua script there. Launched once per Resolve session, it holds the live `resolve` object and executes Lua on behalf of an MCP server that Claude Desktop runs as an extension. Requests travel as a file, answers come back through Fusion's preferences file, and nothing leaves the Mac.
 
 > [!NOTE]
@@ -37,6 +39,8 @@ Claude Desktop shows no dialog when you open a bundle whose extension id is alre
 2. Click `Workspace > Scripts > resolve_mcp_bridge`.
 3. Nothing appears in Resolve's Console. That is expected: the free edition mutes `print` in menu scripts (3.1, 3.2). The script is now looping in the background and Resolve stays responsive.
 4. In Claude Desktop, ask for the bridge status or just start working. `resolve_status` reports `alive: true`, the product, version, edition, page and open project.
+
+<img src="docs/images/scripts-menu.png" width="600" alt="Resolve's Workspace > Scripts menu listing claude_diag and resolve_mcp_bridge">
 
 > [!IMPORTANT]
 > The script lives and dies with Resolve. After every Resolve launch, click `Workspace > Scripts > resolve_mcp_bridge` again before using the tools. The bridge is never started automatically, by design: a loop started through `fusion:Execute` holds Fusion's shared script executor for the whole session (3.5), so the Scripts menu is the only supported launch.
@@ -112,6 +116,8 @@ return { timeline = timeline:GetName(), start_timecode = timeline:GetStartTimeco
 
 Claude Desktop shows these four settings when you install the extension. The defaults work for a standard Resolve installation.
 
+<img src="docs/images/claude-extension-settings.png" width="700" alt="The extension's settings page in Claude Desktop with the four settings and their defaults">
+
 | Setting | Default | What it does |
 |---|---|---|
 | Resolve user scripts folder | `~/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Utility` | Where the two Lua scripts are copied so they appear under `Workspace > Scripts`. Only this folder is ever written, and it is never created: launch Resolve once so it exists. |
@@ -139,7 +145,7 @@ The settings map onto the first four variables; the rest have no setting. A bad 
 
 ## How it works
 
-Numbers in parentheses such as (3.4) are rows of [`docs/research-2026-09.md`](docs/research-2026-09.md) in the source repository, the evidence behind each design choice; "measured" refers to the on-machine diagnostic in [`docs/diagnostic-2026-09.md`](docs/diagnostic-2026-09.md) and the smoke run recorded in [`docs/plan.md`](docs/plan.md). The bundle ships this README without those files.
+Numbers in parentheses such as (3.4) are rows of [`docs/research-2026-09.md`](docs/research-2026-09.md) in the source repository, the evidence behind each design choice; "measured" refers to the on-machine diagnostic in [`docs/diagnostic-2026-09.md`](docs/diagnostic-2026-09.md) and the smoke run recorded in [`docs/plan.md`](docs/plan.md). The bundle ships this README without those files or the images under `docs/images/`.
 
 ```
 Claude Desktop ──stdio──► davinci-resolve-lua-mcp  (node server/index.js, inside the extension)
