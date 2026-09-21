@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current state (as of 2026-09-20)
 
-- **Step 0 is done.** `docs/research-2026-09.md`, `docs/plan-review-2026-09.md` and `docs/plan.md` are committed. `docs/plan.md` is the authoritative ordering, protocol and layout reference; the spec (`docs/claude-code-prompt-resolve-lua-bridge.md`) remains the source of truth for mission, safety rules and definition of done, except where plan-review §§ A-K record a user-approved supersession (response channel via prefs; MCPB distribution; Node/TypeScript runtime).
+- **Step 0 is done.** `docs/plan.md` is the **single source of truth**: mission, measured ground truth, safety rules, protocol v1, repository layout, Steps 1-7 and the definition of done. `docs/plan-review-2026-09.md` is the validation record (sections A-L explain every departure from the original spec, including the user-approved architecture changes: response channel via prefs, MCPB distribution, Node/TypeScript runtime) and `docs/research-2026-09.md` holds the evidence. The original mission spec was retired on 2026-09-20 and exists only in git history (commit `73eb388`); do not look for it.
 - **No code exists yet.** Step 1 (the diagnostic) starts only after the user's explicit go-ahead.
 - Git repository on `main`; `.gitignore` covers `.DS_Store`, `.remember/`, `.venv/`, `node_modules/`, `dist/`, `server/`.
 
@@ -22,7 +22,7 @@ Architecture-level changes (the request file, the prefs response channel, the tr
 
 ## Machine ground truth (verified on this Mac)
 
-The spec's Console measurements (2026-09-19) are authoritative. Verified 2026-09-20:
+The Console measurements of 2026-09-19 in `docs/plan.md` ("Ground truth: measured facts about this machine") are authoritative. Verified 2026-09-20:
 
 - Resolve 21.1.0 build 21.1.00017, free edition. Blackmagic's scripting docs ship at `/Library/Application Support/Blackmagic Design/DaVinci Resolve/Developer/Scripting/`: `README.md` (31 Aug 2026), `CHANGELOG.md`, `DaVinciResolveScript.pyi`, `Examples/`, `Modules/`. **The README no longer contains API tables; `DaVinciResolveScript.pyi` is the signature reference** (typed, with docstrings, 16 marker colours). Use the `.pyi` for the `scripting_api_docs` tool and when writing tools. Deprecated forms to avoid: `GetSetting/SetSetting` (use `GetSettings()/SetSettings({})`), `GetItemsInTrack` (use `GetItemListInTrack`), index-based render job calls (ids are strings), single-arg `GetClipProperty`.
 - The free 21.1 Scripts-menu Lua state is sandboxed (four independent measurements, one on this build): `io`, `os.execute`, `os.remove`, `os.rename`, `require`, `package`, `ffi`, `bmd.readfile/writefile/readdir` are nil; `os` keeps `clock date difftime getenv time tmpname`; `print` output is invisible. Working: `loadfile`, `dofile`, `loadstring`, `pcall`, `bmd.wait/fileexists/direxists/createuuid/gettime/getpid/scriptapp`, the Resolve API, and `fusion:GetPrefs/SetPrefs/SavePrefs`.
@@ -68,7 +68,7 @@ make uninstall-bridge  # removes the two Lua files from the user Utility folder
 
 ## Project-specific rules
 
-From the spec, plus rules learned in Step 0. Not negotiable without the user's say-so.
+Mirror of `docs/plan.md` "Safety and behaviour rules" (the original spec's rules plus those learned in Step 0). Not negotiable without the user's say-so; if the two ever differ, `docs/plan.md` wins.
 
 - **stdout is the MCP transport.** Log with `console.error` and the file log only; `console.log` is never called anywhere in `src/`.
 - **No network listeners of any kind.** Files in, prefs out.
