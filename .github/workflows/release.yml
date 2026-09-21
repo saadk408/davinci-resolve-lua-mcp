@@ -9,14 +9,17 @@
 # failure before "Publish" leaves nothing behind and a re-run is safe only then. GitHub marks the
 # release "Latest" on its own (higher version, later date), which is what
 # releases/latest/download/davinci-resolve-lua-mcp.mcpb follows.
+#
+# The second job publishes the release to the MCP Registry (registry.modelcontextprotocol.io) as
+# io.github.<owner>/davinci-resolve-lua-mcp. It hashes the asset the GitHub Release serves, not the
+# packed file, so the hash is the one clients verify against the download, and it can be re-run on
+# its own (`gh run rerun <run-id> --failed`) without touching the release. GitHub OIDC proves the
+# io.github.<owner> namespace; no secret is involved.
 name: release
 
 on:
   push:
     tags: ['v*']
-
-permissions:
-  contents: write
 
 defaults:
   run:
@@ -31,6 +34,8 @@ jobs:
   release:
     runs-on: macos-latest
     timeout-minutes: 30
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -60,3 +65,30 @@ jobs:
           cat "$RUNNER_TEMP/notes.md"
       - name: Publish
         run: gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md" "$BUNDLE"
+
+  registry:
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+      - name: Registry entry from the published asset
+        run: |
+          asset="$(basename "$BUNDLE")"
+          gh release download "$GITHUB_REF_NAME" --pattern "$asset" --dir "$RUNNER_TEMP"
+          sha="$(shasum -a 256 "$RUNNER_TEMP/$asset" | cut -d' ' -f1)"
+          node scripts/registry-entry.mjs "$GITHUB_REF_NAME" "$sha" "${{ github.repository_id }}" > "$RUNNER_TEMP/server.json"
+          cat "$RUNNER_TEMP/server.json"
+      - name: Install mcp-publisher
+        run: curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+      - name: Publish to the MCP Registry
+        run: |
+          ./mcp-publisher validate "$RUNNER_TEMP/server.json"
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish "$RUNNER_TEMP/server.json"

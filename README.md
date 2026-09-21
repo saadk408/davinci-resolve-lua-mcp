@@ -234,7 +234,7 @@ make install   # make bundle, then open the .mcpb so Claude Desktop shows its di
 
 The developer loop: `make dev-register` once, then `make build` and restart Claude Desktop after each change, with no repack. The dev entry and the installed extension can run side by side: the request-slot lock is taken per request and released at once, so an idle server never blocks the other.
 
-Releases: pushing a `vX.Y.Z` tag runs `.github/workflows/release.yml`, which runs the Node gates and `make bundle` on the tagged commit, then publishes a GitHub Release with the bundle attached and its SHA-256 in the notes; an annotated tag's message becomes the notes' introduction.
+Releases: pushing a `vX.Y.Z` tag runs `.github/workflows/release.yml`, which runs the Node gates and `make bundle` on the tagged commit, then publishes a GitHub Release with the bundle attached and its SHA-256 in the notes; an annotated tag's message becomes the notes' introduction. A second job publishes the release to the [MCP Registry](https://registry.modelcontextprotocol.io) as `io.github.saadk408/davinci-resolve-lua-mcp`, with the hash of the file the release serves.
 
 > [!NOTE]
 > `make smoke` creates and deletes a timeline named `bridge-smoke`, adds and deletes markers on it, and sets the project's render target directory and file name. `SMOKE_PROJECT` must be the name of the project that is open in Resolve, and it should be a scratch project, never a real edit. The run refuses to proceed when the names differ.

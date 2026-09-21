@@ -23,6 +23,7 @@ scripts/gen-types.mjs
 scripts/dev-register.mjs
 scripts/smoke.mjs
 scripts/release-notes.sh
+scripts/registry-entry.mjs
 cert.pem
 key.pem
 *.bak*

@@ -107,8 +107,9 @@ bridge/resolve_mcp_bridge.lua (Scripts-menu Lua state, holds live `resolve`)
 - Layout: `src/` (ten modules; `main.ts` is the wiring, `server.ts` the tools, `lua.ts` the snippets,
   `protocol.ts` the slot and lock, `prefs.ts` the reader, `bridgeInstall.ts` the self-install),
   `server/index.js` (built, git-ignored, shipped), `bridge/resolve_mcp_bridge.lua`, `scripts/`
-  (`claude_diag.lua` ships; `gen-types.mjs`, `dev-register.mjs`, `smoke.mjs`, `release-notes.sh` are
-  developer-only), `types/resolve_host.d.lua` + `.luarc.json` (Lua LSP), `tests/`, `docs/images/`
+  (`claude_diag.lua` ships; `gen-types.mjs`, `dev-register.mjs`, `smoke.mjs`, `release-notes.sh`,
+  `registry-entry.mjs` are developer-only), `types/resolve_host.d.lua` + `.luarc.json` (Lua LSP),
+  `tests/`, `docs/images/`
   (README screenshots; the MP4 recordings are git-ignored, GitHub-hosted), `.github/workflows/`
   (`tests.yml`, `release.yml`), `SECURITY.md`, `PRIVACY.md`.
   `tsconfig.json` covers `src/` and `tests/` only. The bundle is exactly the eight files allowlisted
@@ -151,8 +152,12 @@ Targets (`Makefile`; the README has the table): `test` = `test-lua` + `test-node
   tag push: a guard that the tag equals `v` + the `package.json` and `manifest.json` versions, a
   guard that no release exists for the tag, `make test-node`, `make bundle`,
   `scripts/release-notes.sh`, then `gh release create` with the bundle attached (the README's
-  `releases/latest/download/...` link follows it). The Lua tests and the smoke test need Resolve
-  and stay local.
+  `releases/latest/download/...` link follows it). A second job then publishes the release to the
+  MCP Registry as `io.github.saadk408/davinci-resolve-lua-mcp`: it downloads the asset the release
+  serves, hashes it, generates `server.json` with `scripts/registry-entry.mjs` (nothing is
+  committed; the schema caps the description at 100 characters, so the script carries its own) and
+  publishes with `mcp-publisher login github-oidc`. If only that job fails, `gh run rerun <id>
+  --failed` repeats it alone. The Lua tests and the smoke test need Resolve and stay local.
 - Releasing: bump `package.json` (`npm version --no-git-tag-version`), `manifest.json` and
   `SERVER_VERSION`; when the Lua changed, also the bridge header (line 1 and `VERSION`),
   `claude_diag.lua` (line 1 and `SCRIPT`), `BRIDGE_TAG` in `tests/helpers/fakeBridge.ts` and the
@@ -163,7 +168,12 @@ Targets (`Makefile`; the README has the table): `test` = `test-lua` + `test-node
   the workflow gates, packs and publishes the release with the sha256 in the notes. The locally
   installed bundle is a different pack of the same files (`mcpb pack` never gives the same bytes
   twice), so `dist/` is never committed and a published tag is never re-run; fix forward with a new
-  tag. `SECURITY.md` promises support for the latest release only.
+  tag. A registry entry for a release the workflow did not publish (v0.1.0) is made by hand with
+  the same script: `node scripts/registry-entry.mjs vX.Y.Z <sha256 from gh release view --json
+  assets> $(gh api repos/saadk408/davinci-resolve-lua-mcp --jq .id) > .out/server.json`, then
+  `mcp-publisher login github` (Homebrew `mcp-publisher`, a browser device-code flow) and
+  `mcp-publisher publish .out/server.json`. `SECURITY.md` promises support for the latest release
+  only.
 
 ## Tests
 
