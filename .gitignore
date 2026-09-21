@@ -1,9 +1,12 @@
+__pycache__/
 .DS_Store
+.pytest_cache/
 .remember/
 .venv/
-__pycache__/
-*.pyc
 *.egg-info/
-.pytest_cache/
+*.mcpb
+*.pyc
 build/
 dist/
+node_modules/
+server/
