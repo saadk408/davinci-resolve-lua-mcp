@@ -10,7 +10,7 @@ bad() { printf 'check_bundle: FAIL: %s\n' "$*"; fail=1; }
 
 [ -f "$B" ] || { bad "$B not found (make bundle)"; exit 1; }
 
-REQUIRED="manifest.json package.json server/index.js bridge/resolve_mcp_bridge.lua scripts/claude_diag.lua"
+REQUIRED="manifest.json package.json server/index.js bridge/resolve_mcp_bridge.lua scripts/claude_diag.lua icon.png"
 OPTIONAL="README.md LICENSE"
 
 # 1. File list: mcpb's zip has no directory entries, so this is exactly the file set.
