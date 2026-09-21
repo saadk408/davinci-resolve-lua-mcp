@@ -13,7 +13,7 @@ import { DocsIndex } from '../src/docsSearch.js';
 import { silentLogger } from '../src/log.js';
 import type { Envelope } from '../src/prefs.js';
 import { BridgeClient, BridgeError, START_INSTRUCTION, type Bridge, type BridgeStatus, type RequestOptions } from '../src/protocol.js';
-import { createServer, TOOL_NAMES } from '../src/server.js';
+import { createServer, TOOL_NAMES, type ServerDeps } from '../src/server.js';
 import type { RequestOp } from '../src/lua.js';
 import { BRIDGE_TAG, startFakeBridge } from './helpers/fakeBridge.js';
 import { makeTempDirs, type TempDirs } from './helpers/tmp.js';
@@ -56,11 +56,11 @@ interface Rig {
   close(): Promise<void>;
 }
 
-async function rig(bridge: Bridge = new StubBridge(), env: NodeJS.ProcessEnv = {}): Promise<Rig> {
+async function rig(bridge: Bridge = new StubBridge(), env: NodeJS.ProcessEnv = {}, extra: Pick<ServerDeps, 'onToolFailure'> = {}): Promise<Rig> {
   const dirs = await makeTempDirs();
   const config = loadConfig({ RLB_STATE_DIR: dirs.stateDir, RLB_PREFS_DIR: dirs.prefsDir, RLB_DOCS_DIR: dirs.docsDir, RLB_SCRIPTS_DIR: dirs.scriptsDir, ...env }, dirs.root);
   const install: InstallResult = { outcome: 'up_to_date', message: 'current', scripts_dir: dirs.scriptsDir, state_dir: dirs.stateDir, files: [], checked_at: 'now' };
-  const server = createServer({ config, bridge, docs: new DocsIndex(config.docsDir), install: async () => install, logger: silentLogger, logFile: path.join(dirs.stateDir, 'server.log') });
+  const server = createServer({ config, bridge, docs: new DocsIndex(config.docsDir), install: async () => install, logger: silentLogger, logFile: path.join(dirs.stateDir, 'server.log'), ...extra });
   const [ct, st] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: 'rlb-test', version: '0.0.0' });
   await server.connect(st);
@@ -403,6 +403,49 @@ test('end to end through the real BridgeClient and the fake bridge', async () =>
   } finally {
     fake.stop();
     bridge.releaseLockSync();
+    await r.close();
+  }
+});
+
+test('onToolFailure: one call per BridgeError with the tool name; silent on success, Lua failures and resolve_status; survives a throwing hook', async () => {
+  const seen: Array<[string, string]> = [];
+  let throwNext = false;
+  const stub = new StubBridge().reply(
+    new BridgeError('timeout', 'the bridge did not answer request abc within 3.0 s', 'wait, then retry', { id: 'abc' }),
+    { result: 1, prints: [], ms: 1 },
+    new BridgeError('lock_held', 'another server holds the request slot', 'stop it', { holder_pid: 1 }),
+    { ok: false, error: 'request:1: boom', prints: [], ms: 1 },
+  );
+  const r = await rig(stub, {}, {
+    onToolFailure: (err, tool) => {
+      seen.push([err.kind, tool]);
+      if (throwNext) throw new Error('hook exploded');
+    },
+  });
+  try {
+    const timeout = await r.client.callTool({ name: 'run_lua', arguments: { code: 'slow' } });
+    assert.equal(timeout.isError, true);
+    assert.match(text(timeout), /did not answer request abc.*wait, then retry/);
+    assert.deepEqual(seen, [['timeout', 'run_lua']]);
+
+    const okRes = await r.client.callTool({ name: 'run_lua', arguments: { code: 'return 1' } });
+    assert.notEqual(okRes.isError, true);
+    assert.equal(seen.length, 1, 'success never reports');
+
+    throwNext = true;
+    const held = await r.client.callTool({ name: 'list_timelines', arguments: {} });
+    assert.equal(held.isError, true, 'a throwing hook does not change the result');
+    assert.match(text(held), /another server holds the request slot: stop it/);
+    assert.equal(structured(held)['kind'], 'lock_held');
+    assert.deepEqual(seen[1], ['lock_held', 'list_timelines']);
+    throwNext = false;
+
+    const lua = await r.client.callTool({ name: 'run_lua', arguments: { code: 'error("boom")' } });
+    assert.equal(lua.isError, true);
+    const status = await r.client.callTool({ name: 'resolve_status', arguments: {} });
+    assert.notEqual(status.isError, true);
+    assert.equal(seen.length, 2, 'Lua-side failures and resolve_status never reach the hook');
+  } finally {
     await r.close();
   }
 });

@@ -11,3 +11,6 @@ dist/
 node_modules/
 server/
 .out/
+cert.pem
+key.pem
+.env

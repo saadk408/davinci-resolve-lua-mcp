@@ -78,6 +78,12 @@ export interface ServerDeps {
   logger: Logger;
   /** Absolute path of the server log, for resolve_status. */
   logFile?: string | undefined;
+  /**
+   * Extension point for a private instrumented build: called with the BridgeError and the tool
+   * name wherever a thrown BridgeError becomes an isError result (never on success, never for a
+   * Lua-side failure, never from resolve_status). A throw inside the hook is logged and ignored.
+   */
+  onToolFailure?: ((error: BridgeError, tool: ToolName) => void) | undefined;
 }
 
 // ---- result helpers -------------------------------------------------------------------------
@@ -164,9 +170,18 @@ export function createServer(deps: ServerDeps): McpServer {
     return { data: rest, env };
   }
 
-  function guard(fn: () => Promise<ToolResult>): Promise<ToolResult> {
+  /** Every tool body runs under guard: a thrown BridgeError becomes an isError result (and reaches onToolFailure); anything else is logged as a bug. */
+  function guard(tool: ToolName, fn: () => Promise<ToolResult>): Promise<ToolResult> {
     return fn().catch((err: unknown) => {
-      if (!(err instanceof BridgeError)) logger.error('tool failed', err);
+      if (err instanceof BridgeError) {
+        try {
+          deps.onToolFailure?.(err, tool);
+        } catch (hookErr) {
+          logger.error('onToolFailure hook threw', hookErr);
+        }
+      } else {
+        logger.error('tool failed', err);
+      }
       return failFrom(err);
     });
   }
@@ -264,7 +279,7 @@ export function createServer(deps: ServerDeps): McpServer {
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
     },
     async ({ code, timeout_s }) =>
-      guard(async () => {
+      guard('run_lua', async () => {
         const env = await bridge.request('run', { code, timeoutMs: timeout_s * 1000 });
         const base: Record<string, unknown> = {
           ok: env.ok,
@@ -306,7 +321,7 @@ export function createServer(deps: ServerDeps): McpServer {
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async () =>
-      guard(async () => {
+      guard('get_project_info', async () => {
         const r = await runSnippet(projectInfoSnippet());
         return 'result' in r ? r.result : ok(r.data);
       }),
@@ -324,7 +339,7 @@ export function createServer(deps: ServerDeps): McpServer {
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async () =>
-      guard(async () => {
+      guard('list_projects', async () => {
         const r = await runSnippet(listProjectsSnippet());
         if ('result' in r) return r.result;
         return ok({ ...r.data, projects: asList(r.data['projects']) });
@@ -343,7 +358,7 @@ export function createServer(deps: ServerDeps): McpServer {
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async () =>
-      guard(async () => {
+      guard('list_timelines', async () => {
         const r = await runSnippet(listTimelinesSnippet());
         if ('result' in r) return r.result;
         return ok({ ...r.data, timelines: asList(r.data['timelines']) });
@@ -373,7 +388,7 @@ export function createServer(deps: ServerDeps): McpServer {
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async ({ bin_path, offset, limit }) =>
-      guard(async () => {
+      guard('list_media_pool_clips', async () => {
         const trimmed = bin_path.trim().replace(/^\/+/, '').replace(/\/+$/, '');
         const segments = trimmed === '' ? [] : trimmed.split('/');
         if (segments.some((s) => s === '')) return fail(`bin_path ${JSON.stringify(bin_path)} has an empty segment; use "/" between bin names, e.g. "/Footage/Day 1"`);
@@ -409,7 +424,7 @@ export function createServer(deps: ServerDeps): McpServer {
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async ({ track_type, track_index, offset, limit }) =>
-      guard(async () => {
+      guard('get_timeline_items', async () => {
         const r = await runSnippet(timelineItemsSnippet(track_type, track_index, offset, limit));
         if ('result' in r) return r.result;
         return ok({ ...r.data, items: asList(r.data['items']) });
@@ -434,7 +449,7 @@ export function createServer(deps: ServerDeps): McpServer {
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
     async ({ frame, color, name, note, duration }) =>
-      guard(async () => {
+      guard('add_marker', async () => {
         const r = await runSnippet(addMarkerSnippet(frame, color, name, note, duration));
         if ('result' in r) return r.result;
         return ok({ ...r.data, marker: r.data['marker'] ?? null });
@@ -456,7 +471,7 @@ export function createServer(deps: ServerDeps): McpServer {
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     },
     async ({ color, confirm }) =>
-      guard(async () => {
+      guard('delete_markers', async () => {
         const target = color ?? 'All';
         if (!confirm) {
           return fail(`refused: deleting ${target === 'All' ? 'all markers' : `${target} markers`} needs confirm=true; ask the user, then call again with confirm=true`, { color: target });
@@ -478,7 +493,7 @@ export function createServer(deps: ServerDeps): McpServer {
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async ({ name }) =>
-      guard(async () => {
+      guard('set_current_timeline', async () => {
         const r = await runSnippet(setCurrentTimelineSnippet(name));
         return 'result' in r ? r.result : ok(r.data);
       }),
@@ -499,7 +514,7 @@ export function createServer(deps: ServerDeps): McpServer {
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async ({ name, save_current }) =>
-      guard(async () => {
+      guard('open_project', async () => {
         const r = await runSnippet(openProjectSnippet(name, save_current));
         return 'result' in r ? r.result : ok(r.data);
       }),
@@ -521,7 +536,7 @@ export function createServer(deps: ServerDeps): McpServer {
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
     async ({ preset, output_dir, filename }) =>
-      guard(async () => {
+      guard('render_current_timeline', async () => {
         const dir = expandHome(output_dir.trim(), process.env['HOME'] ?? '');
         if (!path.isAbsolute(dir)) return fail(`output_dir must be an absolute path, got ${JSON.stringify(output_dir)}`);
         try {
@@ -549,7 +564,7 @@ export function createServer(deps: ServerDeps): McpServer {
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async ({ job_id }) =>
-      guard(async () => {
+      guard('get_render_status', async () => {
         const r = await runSnippet(renderStatusSnippet(job_id));
         return 'result' in r ? r.result : ok(r.data);
       }),
@@ -567,7 +582,7 @@ export function createServer(deps: ServerDeps): McpServer {
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async () =>
-      guard(async () => {
+      guard('stop_bridge', async () => {
         const env = await bridge.request('stop', { timeoutMs: 5000 });
         if (!env.ok) return fail(`the bridge refused to stop: ${chunkError(env)}`);
         const result = isRecord(env.result) ? env.result : {};
@@ -590,7 +605,7 @@ export function createServer(deps: ServerDeps): McpServer {
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async ({ query, limit }) =>
-      guard(async () => {
+      guard('scripting_api_docs', async () => {
         const r = await docs.search(query, limit);
         if (!r.ok) return fail(r.error, { docs_dir: r.docs_dir });
         const { ok: _ok, ...rest } = r;

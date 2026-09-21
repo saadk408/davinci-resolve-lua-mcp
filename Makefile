@@ -1,12 +1,18 @@
 # resolve-lua-bridge developer targets (docs/plan.md). Step 2 added the Lua targets, Step 3 the
-# Node targets (build, test-node, check-server, inspect); Step 4 adds bundle/install/dev-register,
-# Step 5 smoke/stop. Node targets source nvm themselves.
+# Node targets (build, test-node, check-server, inspect), Step 4 the bundle and developer-loop targets
+# (bundle, install, sign, dev-register, dev-unregister, uninstall-bridge); Step 5 adds smoke/stop.
+# Node targets source nvm themselves.
 SHELL := /bin/zsh
 FUSCRIPT := /Applications/DaVinci Resolve/DaVinci Resolve.app/Contents/Libraries/Fusion/fuscript
 NVM := . $$HOME/.nvm/nvm.sh >/dev/null 2>&1
 OUT := $(CURDIR)/.out
+MCPB := npx --yes @anthropic-ai/mcpb
+BUNDLE := dist/resolve-lua-bridge.mcpb
+# The user Utility folder the server installs into; RLB_SCRIPTS_DIR overrides it (uninstall-bridge).
+SCRIPTS_DIR = $(if $(RLB_SCRIPTS_DIR),$(RLB_SCRIPTS_DIR),$(HOME)/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Utility)
 
-.PHONY: test test-lua test-node check-bridge check-server lint-lua gen-types typecheck build inspect clean
+.PHONY: test test-lua test-node check-bridge check-server lint-lua gen-types typecheck build inspect clean \
+        bundle install sign dev-register dev-unregister uninstall-bridge
 
 test: test-lua test-node
 
@@ -60,6 +66,39 @@ lint-lua:
 ## Regenerate the API classes in types/resolve_host.d.lua from Blackmagic's .pyi and README.
 gen-types:
 	@$(NVM) && node scripts/gen-types.mjs
+
+## Validate the manifest, pack the bundle (what .mcpbignore leaves in), print it, then gate it with
+## tests/check_bundle.sh (exact file list, size under 2 MB, unpack + tools/list probe under a temp
+## state dir with the self-install off). Packs differ byte-wise (zip mtime); compare `zipinfo -1`.
+bundle: build
+	@mkdir -p dist
+	@$(NVM) && $(MCPB) validate manifest.json && $(MCPB) pack . $(BUNDLE) && $(MCPB) info $(BUNDLE)
+	@$(NVM) && sh tests/check_bundle.sh $(BUNDLE)
+
+## Open the bundle so Claude Desktop shows its install dialog; the click is the user's (Step 5).
+install: bundle
+	@open $(BUNDLE)
+
+## Optional self-signed signature for development (writes cert.pem and key.pem here, git-ignored).
+sign: bundle
+	@$(NVM) && $(MCPB) sign --self-signed $(BUNDLE) && $(MCPB) verify $(BUNDLE)
+
+## Developer loop: merge a claude_desktop_config.json entry that runs this checkout's
+## server/index.js with the current Node (backup first, other entries kept, mode 0600); a code
+## change then needs `make build` and a Claude Desktop restart, not a repack. Never run by the tests.
+dev-register: build
+	@$(NVM) && node scripts/dev-register.mjs
+
+dev-unregister:
+	@$(NVM) && node scripts/dev-register.mjs --remove
+
+## Remove the two Lua files the server installed, and nothing else, from the user Utility folder
+## (or from RLB_SCRIPTS_DIR when set).
+uninstall-bridge:
+	@for f in resolve_lua_bridge.lua claude_diag.lua; do \
+	  p="$(SCRIPTS_DIR)/$$f"; \
+	  if [ -f "$$p" ]; then rm -f "$$p" && echo "removed $$p"; else echo "not present: $$p"; fi; \
+	done
 
 clean:
 	@rm -rf server dist "$(OUT)"

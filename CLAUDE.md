@@ -28,16 +28,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   stdio probe (15 tools, `resolve_status` reporting `never_started`). Decisions are in
   `docs/plan-review-2026-09.md` § N and folded into `docs/plan.md` "Protocol v1". The
   Inspector's acceptance run performed the first-run self-install into the real Utility folder
-  (`resolve_lua_bridge.lua` now sits next to `claude_diag.lua`). Next is Step 4 (bundle pipeline,
-  `.mcpbignore`, `mcpb validate/pack`, `dev-register`, plus the two instrumentation hooks decided
-  on 2026-09-21: `main(options)` with `wrapServer`/`beforeExit` in a new `src/main.ts`, and
-  `onToolFailure` in `ServerDeps`, both no-ops by default, with a `sentry` grep gate; see
-  `docs/plan.md` Step 4 and `docs/plan-review-2026-09.md` § O), then Steps 5-8 in order. Step 8
-  is the user's own Sentry-instrumented build: a separate private repository that holds this one
-  as a git submodule (`upstream/`), imports `main` from it, and packs its own bundle under the
-  same extension name (`docs/plan.md` Step 8 has the topology and the rules). Nothing from it
-  belongs in this repository.
-- Git repository on `main`; `.gitignore` covers `.DS_Store`, `.remember/`, `.venv/`, `node_modules/`, `dist/`, `server/`.
+  (`resolve_lua_bridge.lua` now sits next to `claude_diag.lua`).
+- **Step 4 is done (2026-09-21).** `src/main.ts` holds the wiring as `main(options)` with the
+  three no-op-by-default extension points (`wrapServer`, `onToolFailure`, `beforeExit`) and a
+  `runtime` seam for tests; `src/index.ts` is `void main()`; `ServerDeps.onToolFailure` is called
+  from `guard(tool, fn)` in `server.ts`. `.mcpbignore`, `tests/check_bundle.sh`,
+  `scripts/dev-register.mjs`, the `sentry` grep gate in `tests/check_server.sh`, the Makefile
+  targets `bundle`, `install`, `sign`, `dev-register`, `dev-unregister`, `uninstall-bridge`, and
+  `tests/main.test.ts` + `tests/devRegister.test.ts` (73 Node cases now). `make bundle` packs
+  `dist/resolve-lua-bridge.mcpb` (5 files, 204 KB packed, 943 KB unpacked) and the unpacked copy
+  answered `tools/list` with the 15 tools. Not run: `make install` (Step 5, the user's click),
+  `make dev-register` against the real `claude_desktop_config.json` (tested on temp files only),
+  `make uninstall-bridge` against the real Utility folder. Notes in `docs/plan-review-2026-09.md`
+  § P. Next is Step 5 (install and end-to-end check, USER), then Steps 6-8 in order. Step 8 is
+  the user's own Sentry-instrumented build: a separate private repository that holds this one as
+  a git submodule (`upstream/`), imports `main` from it, and packs its own bundle under the same
+  extension name (`docs/plan.md` Step 8 has the topology and the rules). Nothing from it belongs
+  in this repository.
+- Git repository on `main`; `.gitignore` covers `.DS_Store`, `.remember/`, `.venv/`, `node_modules/`, `dist/`, `server/`, `*.mcpb`, `cert.pem`, `key.pem`, `.env`.
 
 ## Hard gates, in order
 
@@ -85,7 +93,7 @@ Real targets (`Makefile`; the Node targets source nvm themselves):
 
 - `make test` = `make test-lua` + `make test-node`.
 - `make test-lua`: `tests/lua/check_bridge.sh` (line count under 600, the two header lines, forbidden calls on comment-stripped lines, exactly one `:SetPrefs(`/`:SavePrefs(`/`:GetPrefs(` call site), then `fuscript -l lua tests/lua/run_tests.lua` against stub objects in a `mktemp -d` scratch dir. It passes only when the log ends with `RLB_TESTS_RESULT: PASS`, because `fuscript` exits 0 whatever the script does.
-- `make test-node`: `tests/check_server.sh` (no `console.log`/`process.stdout`, no `child_process`, no network modules or listeners in `src/`, no raw template hole inside a quoted Lua string in `lua.ts`), `npm run typecheck` (`tsc --noEmit`), then `npm test` = `node --import tsx --test tests/*.test.ts` (64 cases, about 3 s; every fixture is a temp dir; the three `fuscript`-backed tests skip themselves when Resolve is absent).
+- `make test-node`: `tests/check_server.sh` (no `console.log`/`process.stdout`, no `child_process`, no network modules or listeners in `src/`, no raw template hole inside a quoted Lua string in `lua.ts`, and the word `sentry` in any case nowhere in `src/`, `package.json` or `manifest.json`), `npm run typecheck` (`tsc --noEmit`), then `npm test` = `node --import tsx --test tests/*.test.ts` (73 cases, about 3 s; every fixture is a temp dir; the three `fuscript`-backed tests skip themselves when Resolve is absent; `devRegister.test.ts` spawns the script against a temp config).
 - `make build`: `tsc --noEmit`, then `esbuild src/index.ts --bundle --platform=node --format=cjs --target=node20 --outfile=server/index.js` (about 900 KB, git-ignored, shipped in the bundle).
 - `make inspect`: `make build`, then `npx @modelcontextprotocol/inspector --cli node server/index.js -- --method tools/list`. The Inspector spawns the server with a filtered environment, so it runs with the production defaults: real state dir, real prefs file, and the first-run self-install into the real Utility folder.
 - `make lint-lua`: `node scripts/gen-types.mjs --check` (the generated types block matches the installed `.pyi`), then `lua-language-server --check` of the workspace at Warning level as JSON in `.out/luals-check.json`; fails on any diagnostic under `bridge/` or `tests/` (the diag script's accepted warnings do not count).
@@ -94,15 +102,17 @@ Real targets (`Makefile`; the Node targets source nvm themselves):
 - Syntax check of one Lua file: `"/Applications/DaVinci Resolve/DaVinci Resolve.app/Contents/Libraries/Fusion/fuscript" -l lua -x 'assert(loadfile("<abs>/file.lua")); print("ok")'` (absolute paths; the tool prints a two-line banner on stdout, filter it with `grep -v -e '^DaVinci Resolve Script' -e '^Copyright'`).
 - Drive the built server by hand: pipe JSON-RPC lines (`initialize`, `notifications/initialized`, `tools/list`, `tools/call`) into `RLB_STATE_DIR=<tmp> RLB_AUTO_INSTALL=false node server/index.js`; the answers come back one per line on stdout, the log on stderr. In-flight calls finish after stdin closes (5 s grace).
 
+- `make bundle`: `make build`, `npx @anthropic-ai/mcpb validate manifest.json`, `mcpb pack . dist/resolve-lua-bridge.mcpb` (what `.mcpbignore` leaves in: `manifest.json`, `package.json`, `server/index.js`, `bridge/resolve_lua_bridge.lua`, `scripts/claude_diag.lua`, later `README.md`), `mcpb info`, then `tests/check_bundle.sh` (the `zipinfo -1` file list against an allowlist, size under 2 MB, `unzip` into a temp dir and a stdio `initialize`/`tools/list` probe of the unpacked `server/index.js` under a temp `RLB_STATE_DIR` with `RLB_AUTO_INSTALL=false`, so nothing outside the temp dir is touched). Two packs give the same file list but different bytes (the zip mtime is the pack time).
+- `make install`: `make bundle`, then `open dist/resolve-lua-bridge.mcpb` so Claude Desktop shows its install dialog. The click is the user's (Step 5); never run it unasked.
+- `make sign`: optional `mcpb sign --self-signed` + `mcpb verify` (writes `cert.pem`/`key.pem`, git-ignored and bundle-ignored).
+- `make dev-register` / `make dev-unregister`: `scripts/dev-register.mjs` merges (or removes) a `davinci-resolve-lua` entry in `~/Library/Application Support/Claude/claude_desktop_config.json` that runs `<repo>/server/index.js` with the current Node binary (`process.execPath`); backs the file up to `<file>.bak-<stamp>` first, keeps every other key, writes tmp + rename with mode 0600, refuses an unparsable file. Flags: `--config <path>`, `--name <key>`, `--env <path>` (`RLB_*` lines of a `KEY=VALUE` file become the entry's env; default `<repo>/.env`), `--dry-run`, `--remove`. It changes the user's Claude Desktop config: run it against the real file only when the user asks; the tests use temp files.
+- `make uninstall-bridge`: `rm -f` of exactly `resolve_lua_bridge.lua` and `claude_diag.lua` under `RLB_SCRIPTS_DIR` or the default user Utility folder, printing each path; touches nothing else.
+
 Planned targets (update this section once they are real):
 
 ```sh
-make bundle        # build + mcpb validate + mcpb pack . dist/resolve-lua-bridge.mcpb + mcpb info
-make install       # bundle, then open the .mcpb so Claude Desktop shows its install dialog
-make dev-register  # developer loop: merge a claude_desktop_config.json entry pointing at server/index.js
 make smoke         # against live Resolve + running bridge; only touches a timeline named bridge-smoke it creates
 make stop          # sends the stop request to the bridge
-make uninstall-bridge  # removes the two Lua files from the user Utility folder
 ```
 
 ## Project-specific rules
@@ -175,3 +185,6 @@ When and how to use them:
 - TypeScript layout facts (Step 3): the package is CJS (no `"type": "module"`), `tsconfig` is `module: NodeNext` in CJS mode, so relative imports end in `.js`, `__dirname` works, and a test file cannot use top-level `await` (use `existsSync` for skip conditions). `@types/node` is pinned to 20 so `tsc` rejects Node 21+ APIs. `import * as z from 'zod/v4'`; `InMemoryTransport` comes from `@modelcontextprotocol/server`, `Client` from `@modelcontextprotocol/client`. `outputSchema` uses `z.looseObject` because the v2 client rejects extra keys in `structuredContent` against a strict `z.object`, and `isError` results skip output validation.
 - Node tests never touch `~/Library` or `/Library`: `RLB_STATE_DIR`, `RLB_PREFS_DIR`, `RLB_DOCS_DIR` and `RLB_SCRIPTS_DIR` point at `tests/helpers/tmp.ts` temp dirs; `tests/helpers/fakeBridge.ts` answers `next.lua` by rewriting a Fusion-format prefs file (tmp + rename) and models the bridge's id de-duplication, single-save stop and failure modes (`silent`, `late`, `wrong_id`, `half_written`, `garbage_hex`, `garbage_json`). Tool tests use a recording `Bridge` stub (`createServer` takes the `Bridge` interface) and assert on the captured Lua.
 - The MCP Inspector CLI does not forward `RLB_*` shell variables to the server it spawns (SDK default environment); a run against the built server uses the production paths and self-installs the scripts. Use the hand-driven stdio pipe with `RLB_STATE_DIR`/`RLB_AUTO_INSTALL=false` when that is unwanted.
+- Extension points (Step 4, for the private build of Step 8; no-ops by default): `main(options)` in `src/main.ts` takes `wrapServer` (applied inside the `serveStdio` factory right after `createServer`; it must return that `McpServer` or a Proxy over it, because `serveStdio` checks `instanceof McpServer` and takes `.server` from it), `onToolFailure` (forwarded to `ServerDeps`; `guard(tool, fn)` in `server.ts` calls it wherever a thrown `BridgeError` becomes an `isError` result, never on success, never for Lua-side failures, never from `resolve_status`; a throw inside it is logged and ignored) and `beforeExit` (awaited on every exit path, the clean shutdown and both crash handlers, behind a ref'd 2 s timer; ref'd on purpose, because after the transport closes an unref'd timer would let Node exit before `exit(code)` runs). `options.runtime` (`env`, `proc`, `transport`, `beforeExitCapMs`) is a test seam only: `tests/main.test.ts` drives `main()` in-process with a fake `EventEmitter` process and the server half of `InMemoryTransport.createLinkedPair()` (`serveStdio` accepts any `Transport`, starts it itself and calls the factory once per connection). Every process listener goes through `runtime.proc`; never register on the real `process` in a test (a `node --test` child's stdin ends at once and would arm a real `process.exit`).
+- `mcpb pack` (2.1.2) walks the directory with the `ignore` package (gitignore syntax) after its built-in excludes (`.git`, `.DS_Store`, `*.log`, `*.map`, `.env*`, `package-lock.json`, `tsconfig.json`, `*.d.ts`, `*.mcpb`) which do **not** cover `node_modules`, `.claude`, `.remember` or `.out`; `.mcpbignore` lists them without trailing slashes (`src/` would not match the directory entry itself and the walker would descend into it). The manifest schema is strict but allows `$schema`. `mcpb pack` needs neither `README.md` nor an icon.
+- Any script or test that must spawn a process (the bundle probe in `tests/check_bundle.sh`, `tests/devRegister.test.ts`) is fine: the no-spawn rule and the `child_process` grep cover `src/` only. macOS shell facts used there: `zipinfo -1` for a bare file list, `stat -f %z` for a size, `/usr/bin/unzip` and `/usr/bin/open` exist.
