@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current state (as of 2026-09-20)
 
-- **Step 0 is done.** `docs/plan.md` is the **single source of truth**: mission, measured ground truth, safety rules, protocol v1, repository layout, Steps 1-7 and the definition of done. `docs/plan-review-2026-09.md` is the validation record (sections A-L explain every departure from the original spec, including the user-approved architecture changes: response channel via prefs, MCPB distribution, Node/TypeScript runtime) and `docs/research-2026-09.md` holds the evidence. The original mission spec was retired on 2026-09-20 and exists only in git history (commit `73eb388`); do not look for it.
+- **Step 0 is done.** `docs/plan.md` is the **single source of truth**: mission, measured ground truth, safety rules, protocol v1, repository layout, Steps 1-8 (Step 8 is the private instrumented build in a separate repository, outside the definition of done) and the definition of done. `docs/plan-review-2026-09.md` is the validation record (sections A-L explain every departure from the original spec, including the user-approved architecture changes: response channel via prefs, MCPB distribution, Node/TypeScript runtime) and `docs/research-2026-09.md` holds the evidence. The original mission spec was retired on 2026-09-20 and exists only in git history (commit `73eb388`); do not look for it.
 - **Step 1 is done (2026-09-20): verdict CONTINUE.** `docs/diagnostic-2026-09.md` is the verbatim
   record (two runs, both decoded results, the prefs observer log, the user's report) and its
   "Consequences for the plan" section lists what was folded into `docs/plan.md` and this file.
@@ -29,7 +29,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   `docs/plan-review-2026-09.md` § N and folded into `docs/plan.md` "Protocol v1". The
   Inspector's acceptance run performed the first-run self-install into the real Utility folder
   (`resolve_lua_bridge.lua` now sits next to `claude_diag.lua`). Next is Step 4 (bundle pipeline,
-  `.mcpbignore`, `mcpb validate/pack`, `dev-register`), then Steps 5-7 in order.
+  `.mcpbignore`, `mcpb validate/pack`, `dev-register`, plus the two instrumentation hooks decided
+  on 2026-09-21: `main(options)` with `wrapServer`/`beforeExit` in a new `src/main.ts`, and
+  `onToolFailure` in `ServerDeps`, both no-ops by default, with a `sentry` grep gate; see
+  `docs/plan.md` Step 4 and `docs/plan-review-2026-09.md` § O), then Steps 5-8 in order. Step 8
+  is the user's own Sentry-instrumented build: a separate private repository that holds this one
+  as a git submodule (`upstream/`), imports `main` from it, and packs its own bundle under the
+  same extension name (`docs/plan.md` Step 8 has the topology and the rules). Nothing from it
+  belongs in this repository.
 - Git repository on `main`; `.gitignore` covers `.DS_Store`, `.remember/`, `.venv/`, `node_modules/`, `dist/`, `server/`.
 
 ## Hard gates, in order
