@@ -1,16 +1,16 @@
 {
   "$schema": "https://raw.githubusercontent.com/modelcontextprotocol/mcpb/main/dist/manifest.schema.json",
   "manifest_version": "0.4",
-  "name": "resolve-lua-bridge",
-  "display_name": "DaVinci Resolve (Lua bridge)",
+  "name": "davinci-resolve-lua-mcp",
+  "display_name": "DaVinci Resolve Lua MCP",
   "version": "0.1.0",
-  "description": "Control DaVinci Resolve 21.1 (free edition, macOS) from Claude through a Lua script that runs inside Resolve.",
-  "long_description": "DaVinci Resolve 21.1 removed Python and external scripting from the free edition. This extension talks to Resolve through the one door left: a Lua script launched from Workspace > Scripts inside Resolve, which holds the live `resolve` object and executes Lua on behalf of the server. The server writes request files, the script answers through Fusion preferences; no network is involved. On first run the server copies its two Lua scripts into Resolve's user Utility scripts folder. Then, in Resolve, open a project and run Workspace > Scripts > resolve_lua_bridge.",
+  "description": "Control the free edition of DaVinci Resolve 21.1 from Claude through a Lua script that runs inside Resolve. macOS, no Studio licence, no network.",
+  "long_description": "DaVinci Resolve 21.1 removed Python and external scripting from the free edition. This extension talks to Resolve through the one door left: a Lua script launched from Workspace > Scripts inside Resolve, which holds the live `resolve` object and executes Lua on behalf of the server. The server writes request files, the script answers through Fusion preferences; no network is involved. On first run the server copies its two Lua scripts into Resolve's user Utility scripts folder. Then, in Resolve, open a project and run Workspace > Scripts > resolve_mcp_bridge.",
   "author": {
     "name": "Saad Khan"
   },
   "license": "MIT",
-  "keywords": ["davinci-resolve", "video-editing", "lua", "blackmagic", "mcp"],
+  "keywords": ["davinci-resolve", "video-editing", "lua", "blackmagic", "mcp", "mcp-server", "claude-desktop"],
   "server": {
     "type": "node",
     "entry_point": "server/index.js",
@@ -36,7 +36,7 @@
     "auto_install_bridge": {
       "type": "boolean",
       "title": "Install the bridge scripts automatically",
-      "description": "Copy (and update) resolve_lua_bridge.lua and claude_diag.lua into the scripts folder when the server starts.",
+      "description": "Copy (and update) resolve_mcp_bridge.lua and claude_diag.lua into the scripts folder when the server starts.",
       "default": true,
       "required": false
     },
@@ -44,7 +44,7 @@
       "type": "directory",
       "title": "State directory",
       "description": "Where the request file, the lock and the server log live (created with mode 0700).",
-      "default": "${HOME}/.resolve-lua-bridge",
+      "default": "${HOME}/.davinci-resolve-lua-mcp",
       "required": false
     },
     "default_timeout_s": {

@@ -1,4 +1,4 @@
--- run_tests.lua: tests for bridge/resolve_lua_bridge.lua under Resolve's bundled LuaJIT:
+-- run_tests.lua: tests for bridge/resolve_mcp_bridge.lua under Resolve's bundled LuaJIT:
 --   "/Applications/DaVinci Resolve/DaVinci Resolve.app/Contents/Libraries/Fusion/fuscript" \
 --     -l lua <abs>/tests/lua/run_tests.lua
 -- Env: RLB_TEST_DIR (scratch dir; default a fresh os.tmpname() .. ".d"), RLB_BRIDGE (bridge
@@ -15,7 +15,7 @@ local real_print = print
 
 local SCRIPT = (arg and arg[0]) or ""
 local ROOT = SCRIPT:match("^(.*)/tests/lua/[^/]+$") or "."
-local BRIDGE = os.getenv("RLB_BRIDGE") or (ROOT .. "/bridge/resolve_lua_bridge.lua")
+local BRIDGE = os.getenv("RLB_BRIDGE") or (ROOT .. "/bridge/resolve_mcp_bridge.lua")
 local DIR = os.getenv("RLB_TEST_DIR")
 if not DIR or #DIR == 0 then DIR = os.tmpname() .. ".d" end
 local STATE = DIR .. "/state"
@@ -527,9 +527,9 @@ eq("stamp", dir, "/tmp/stamped"); eq("stamp source", src, "stamp")
 dir, src = M.resolve_state_dir("@@RLB_STATE_DIR@@", genv({ RLB_STATE_DIR = "/e/dir", HOME = "/h" }), mp)
 eq("env", dir, "/e/dir"); eq("env source", src, "env")
 dir, src = M.resolve_state_dir("", genv({ HOME = "/h/" }), mp)
-eq("home", dir, "/h/.resolve-lua-bridge"); eq("home source", src, "HOME")
+eq("home", dir, "/h/.davinci-resolve-lua-mcp"); eq("home source", src, "HOME")
 dir, src = M.resolve_state_dir("@@RLB_STATE_DIR@@", genv({}), mp)
-eq("profile", dir, "/Users/x/.resolve-lua-bridge"); eq("profile source", src, "profile")
+eq("profile", dir, "/Users/x/.davinci-resolve-lua-mcp"); eq("profile source", src, "profile")
 dir, src = M.resolve_state_dir("@@RLB_STATE_DIR@@", genv({}), nil)
 check("none", dir == nil and src:match("no state directory") ~= nil, src)
 eq("stamp placeholder", M.STATE_DIR_STAMP, "@@RLB_STATE_DIR@@")
@@ -632,7 +632,7 @@ sess = session_table()
 check("no state dir: session error", sess and sess.state == "error")
 FU.profile = saved_profile
 local st6 = M.start({ resolve = resolve_stub, fusion = fusion_stub, getenv = genv({ HOME = DIR .. "/home" }) })
-check("HOME state dir", st6 and st6.state_dir == DIR .. "/home/.resolve-lua-bridge" and st6.state_dir_source == "HOME", st6 and st6.state_dir)
+check("HOME state dir", st6 and st6.state_dir == DIR .. "/home/.davinci-resolve-lua-mcp" and st6.state_dir_source == "HOME", st6 and st6.state_dir)
 eq("missing state dir is not an error", M.run_loop(st6, 3, 0), "ticks")
 remove_file(RQ)
 FU.fail_saves, FU.saves = 5, 0

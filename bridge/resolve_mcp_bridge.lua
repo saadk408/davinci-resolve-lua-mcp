@@ -1,6 +1,6 @@
--- resolve_lua_bridge v0.1.0
+-- resolve_mcp_bridge v0.1.0
 -- RLB_STATE_DIR=@@RLB_STATE_DIR@@
--- The in-Resolve half of resolve-lua-bridge (docs/plan.md, protocol v1). Launched from
+-- The in-Resolve half of davinci-resolve-lua-mcp (docs/plan.md, protocol v1). Launched from
 -- Workspace > Scripts, it polls <state_dir>/next.lua, runs the chunk a request carries, and answers
 -- through Fusion prefs (Global.ResolveLuaBridge.RLBResp = "<id>:<hex json>", one SavePrefs per
 -- request; RLBSession once at start and on stop). The host facts it relies on are measured, not
@@ -11,7 +11,7 @@
 local MODE = ...
 
 local VERSION = "0.1.0"
-local BRIDGE = "resolve_lua_bridge v" .. VERSION
+local BRIDGE = "resolve_mcp_bridge v" .. VERSION
 local STATE_DIR_STAMP = [==[@@RLB_STATE_DIR@@]==] -- server-stamped at copy time; long bracket: quotes are safe
 local PREFIX = "Global.ResolveLuaBridge."
 local TICK = 0.05                              -- seconds between bmd.fileexists polls
@@ -293,11 +293,11 @@ local function resolve_state_dir(stamp, getenv, mappath)
   local env = getenv and getenv("RLB_STATE_DIR")
   if type(env) == "string" and #env > 0 then return strip(env), "env" end
   local home = getenv and getenv("HOME")
-  if type(home) == "string" and #home > 0 then return strip(home) .. "/.resolve-lua-bridge", "HOME" end
+  if type(home) == "string" and #home > 0 then return strip(home) .. "/.davinci-resolve-lua-mcp", "HOME" end
   if mappath then
     local ok, profile = pcall(mappath, "Profile:")
     local pre = ok and type(profile) == "string" and profile:match("^(.-)/Library/") or nil
-    if pre and #pre > 0 then return pre .. "/.resolve-lua-bridge", "profile" end
+    if pre and #pre > 0 then return pre .. "/.davinci-resolve-lua-mcp", "profile" end
   end
   return nil, "no state directory: RLB_STATE_DIR not stamped, RLB_STATE_DIR and HOME unset"
 end

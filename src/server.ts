@@ -29,7 +29,7 @@ import {
 import type { Envelope } from './prefs.js';
 import { BridgeError, START_INSTRUCTION, type Bridge } from './protocol.js';
 
-export const SERVER_NAME = 'resolve-lua-bridge';
+export const SERVER_NAME = 'davinci-resolve-lua-mcp';
 export const SERVER_VERSION = '0.1.0';
 
 export const TOOL_NAMES = [
@@ -51,7 +51,7 @@ export const TOOL_NAMES = [
 ] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];
 
-export const INSTRUCTIONS = `These tools control DaVinci Resolve 21.1 (free edition) on this Mac through a Lua script that runs inside Resolve (the "bridge"). The bridge must be running: when a tool answers "bridge not running", the user has to open a project in Resolve and click Workspace > Scripts > resolve_lua_bridge (Resolve's Console shows nothing; that is expected), then the call can be retried. resolve_status reports whether the bridge is alive and why not.
+export const INSTRUCTIONS = `These tools control DaVinci Resolve 21.1 (free edition) on this Mac through a Lua script that runs inside Resolve (the "bridge"). The bridge must be running: when a tool answers "bridge not running", the user has to open a project in Resolve and click Workspace > Scripts > resolve_mcp_bridge (Resolve's Console shows nothing; that is expected), then the call can be retried. resolve_status reports whether the bridge is alive and why not.
 
 Prefer the purpose-built tools; use run_lua for anything they do not cover. Before writing Lua, look the method up with scripting_api_docs, and avoid the deprecated forms Blackmagic's shipped examples still use (GetSetting/SetSetting, GetItemsInTrack, index-based render-job calls, single-argument GetClipProperty).
 

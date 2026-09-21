@@ -6,7 +6,7 @@ const HOME = '/Users/tester';
 
 test('defaults derive from HOME and the docs live under /Library', () => {
   const c = loadConfig({}, HOME);
-  assert.equal(c.stateDir, '/Users/tester/.resolve-lua-bridge');
+  assert.equal(c.stateDir, '/Users/tester/.davinci-resolve-lua-mcp');
   assert.equal(c.scriptsDir, '/Users/tester/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Utility');
   assert.equal(c.prefsDir, '/Users/tester/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Profiles');
   assert.equal(c.docsDir, '/Library/Application Support/Blackmagic Design/DaVinci Resolve/Developer/Scripting');
@@ -44,7 +44,7 @@ test('values are read, ~ expanded, trailing slashes dropped and empty strings tr
   assert.equal(expandHome('~/x', HOME), '/Users/tester/x');
   assert.equal(expandHome('~x', HOME), '~x');
   assert.equal(expandHome('${HOME}', HOME), HOME);
-  assert.equal(expandHome('${HOME}/.resolve-lua-bridge', HOME), '/Users/tester/.resolve-lua-bridge');
+  assert.equal(expandHome('${HOME}/.davinci-resolve-lua-mcp', HOME), '/Users/tester/.davinci-resolve-lua-mcp');
   assert.equal(expandHome('${HOMEX}/y', HOME), '${HOMEX}/y');
 });
 
@@ -59,7 +59,7 @@ test('bad values fall back and are recorded as problems', () => {
     },
     HOME,
   );
-  assert.equal(c.stateDir, '/Users/tester/.resolve-lua-bridge');
+  assert.equal(c.stateDir, '/Users/tester/.davinci-resolve-lua-mcp');
   assert.equal(c.autoInstall, true);
   assert.equal(c.defaultTimeoutS, 30);
   assert.equal(c.maxResponseKb, 64);
@@ -70,7 +70,7 @@ test('bad values fall back and are recorded as problems', () => {
 });
 
 test('a state dir that cannot be stamped disables auto-install', () => {
-  assert.equal(stateDirStampProblem('/Users/x/.resolve-lua-bridge'), undefined);
+  assert.equal(stateDirStampProblem('/Users/x/.davinci-resolve-lua-mcp'), undefined);
   assert.match(stateDirStampProblem('/x/]==]/y') ?? '', /]==]/);
   assert.match(stateDirStampProblem('/x/"q"') ?? '', /quote/);
   assert.match(stateDirStampProblem('/x/back\\slash') ?? '', /backslash/);
@@ -85,12 +85,12 @@ test('a state dir that cannot be stamped disables auto-install', () => {
 test('the literal ${HOME} defaults Claude Desktop 2.2553.1 passes through are expanded without a problem', () => {
   const c = loadConfig(
     {
-      RLB_STATE_DIR: '${HOME}/.resolve-lua-bridge',
+      RLB_STATE_DIR: '${HOME}/.davinci-resolve-lua-mcp',
       RLB_SCRIPTS_DIR: '${HOME}/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Utility',
     },
     HOME,
   );
-  assert.equal(c.stateDir, '/Users/tester/.resolve-lua-bridge');
+  assert.equal(c.stateDir, '/Users/tester/.davinci-resolve-lua-mcp');
   assert.equal(c.scriptsDir, '/Users/tester/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Utility');
   assert.deepEqual(c.problems, []);
 });

@@ -8,7 +8,7 @@
 //   node scripts/dev-register.mjs              add or update the entry
 //   node scripts/dev-register.mjs --remove     delete the entry
 //   --config <path>   the config file (default ~/Library/Application Support/Claude/claude_desktop_config.json)
-//   --name <key>      the mcpServers key (default davinci-resolve-lua)
+//   --name <key>      the mcpServers key (default davinci-resolve-lua-mcp-dev)
 //   --env <path>      KEY=VALUE file whose RLB_* lines become the entry's env (default <repo>/.env)
 //   --dry-run         print the resulting config and write nothing
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
@@ -25,7 +25,7 @@ function opt(name, fallback) {
 }
 
 const configPath = resolve(opt('--config', join(homedir(), 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json')));
-const name = opt('--name', 'davinci-resolve-lua');
+const name = opt('--name', 'davinci-resolve-lua-mcp-dev');
 const envPath = resolve(opt('--env', join(root, '.env')));
 const remove = args.includes('--remove');
 const dryRun = args.includes('--dry-run');

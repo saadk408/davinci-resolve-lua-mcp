@@ -19,7 +19,7 @@ import {
 } from './prefs.js';
 
 export const START_INSTRUCTION =
-  'in Resolve open a project and run Workspace > Scripts > resolve_lua_bridge, then retry';
+  'in Resolve open a project and run Workspace > Scripts > resolve_mcp_bridge, then retry';
 
 export type BridgeErrorKind =
   | 'lock_held'
@@ -306,7 +306,7 @@ export class BridgeClient implements Bridge {
     throw new BridgeError(
       'lock_held',
       `another server (pid ${holder}) kept the request slot lock ${this.lockPath} for more than ${(waitMs / 1000).toFixed(1)} s`,
-      'it may be running a long chunk: wait, then retry; if it persists, stop the other resolve-lua-bridge server (a second Claude Desktop entry, make smoke or a dev-register loop) or point RLB_STATE_DIR elsewhere; remove the lock file by hand if the pid is not a server',
+      'it may be running a long chunk: wait, then retry; if it persists, stop the other davinci-resolve-lua-mcp server (a second Claude Desktop entry, make smoke or a dev-register loop) or point RLB_STATE_DIR elsewhere; remove the lock file by hand if the pid is not a server',
       { lock: this.lockPath, holder_pid: holder, waited_ms: waitMs },
     );
   }

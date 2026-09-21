@@ -33,7 +33,7 @@ export const DEFAULT_DOCS_DIR =
   '/Library/Application Support/Blackmagic Design/DaVinci Resolve/Developer/Scripting';
 
 export function defaultStateDir(home: string): string {
-  return path.join(home, '.resolve-lua-bridge');
+  return path.join(home, '.davinci-resolve-lua-mcp');
 }
 
 export function defaultScriptsDir(home: string): string {

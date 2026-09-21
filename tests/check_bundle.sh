@@ -2,15 +2,15 @@
 # Gate for the packed bundle (docs/plan.md Step 4): the archive holds exactly the shipped files,
 # stays under 2 MB, and the unpacked copy answers tools/list with the 15 tools over stdio (under a
 # temp state dir, with the self-install off, so nothing outside the temp dir is touched).
-# Run: sh tests/check_bundle.sh dist/resolve-lua-bridge.mcpb
+# Run: sh tests/check_bundle.sh dist/davinci-resolve-lua-mcp.mcpb
 set -u
-B="${1:-dist/resolve-lua-bridge.mcpb}"
+B="${1:-dist/davinci-resolve-lua-mcp.mcpb}"
 fail=0
 bad() { printf 'check_bundle: FAIL: %s\n' "$*"; fail=1; }
 
 [ -f "$B" ] || { bad "$B not found (make bundle)"; exit 1; }
 
-REQUIRED="manifest.json package.json server/index.js bridge/resolve_lua_bridge.lua scripts/claude_diag.lua"
+REQUIRED="manifest.json package.json server/index.js bridge/resolve_mcp_bridge.lua scripts/claude_diag.lua"
 OPTIONAL="README.md LICENSE"
 
 # 1. File list: mcpb's zip has no directory entries, so this is exactly the file set.

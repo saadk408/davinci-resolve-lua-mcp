@@ -1,10 +1,10 @@
 #!/bin/sh
-# Grep gates for bridge/resolve_lua_bridge.lua (docs/plan.md Step 2 acceptance). Full-line
+# Grep gates for bridge/resolve_mcp_bridge.lua (docs/plan.md Step 2 acceptance). Full-line
 # comments are stripped before the forbidden-call checks (a header comment once tripped the
 # os.exit check). The forbidden-call pattern is self-tested against a sample so a regex edit
 # cannot silently stop matching. Run: sh tests/lua/check_bridge.sh [path]
 set -u
-F="${1:-bridge/resolve_lua_bridge.lua}"
+F="${1:-bridge/resolve_mcp_bridge.lua}"
 fail=0
 bad() { printf 'check_bridge: FAIL: %s\n' "$*"; fail=1; }
 
@@ -33,7 +33,7 @@ n=$(printf '%s\n' "$clean" | grep -cE "$PATTERN")
 lines=$(wc -l < "$F" | tr -d ' ')
 [ "$lines" -lt 600 ] || bad "$lines lines (limit 600)"
 
-sed -n 1p "$F" | grep -Eq '^-- resolve_lua_bridge v[0-9]+\.[0-9]+\.[0-9]+$' || bad "line 1 is not the version header"
+sed -n 1p "$F" | grep -Eq '^-- resolve_mcp_bridge v[0-9]+\.[0-9]+\.[0-9]+$' || bad "line 1 is not the version header"
 [ "$(sed -n 2p "$F")" = "-- RLB_STATE_DIR=@@RLB_STATE_DIR@@" ] || bad "line 2 is not the state-dir stamp"
 n=$(grep -c -F '[==[@@RLB_STATE_DIR@@]==]' "$F")
 [ "$n" = 1 ] || bad "expected exactly 1 long-bracket state-dir stamp, found $n"

@@ -36,7 +36,7 @@ test('dev-register merges the entry, keeps everything else, backs up, keeps 0600
     assert.equal(after['coworkUserFilesPath'], '/x');
     assert.deepEqual(after['preferences'], { a: 1 });
     assert.deepEqual(after['mcpServers'].other, { command: 'npx', args: ['-y', 'thing'] });
-    assert.deepEqual(after['mcpServers']['davinci-resolve-lua'], {
+    assert.deepEqual(after['mcpServers']['davinci-resolve-lua-mcp-dev'], {
       command: process.execPath,
       args: [SERVER_JS],
       env: { RLB_LOG_LEVEL: 'debug', RLB_STATE_DIR: '/tmp/rlb' },
@@ -49,7 +49,7 @@ test('dev-register merges the entry, keeps everything else, backs up, keeps 0600
     const r2 = run('--config', cfg, '--remove');
     assert.equal(r2.status, 0, r2.stderr);
     const removed = await readJson(cfg);
-    assert.equal(removed['mcpServers']['davinci-resolve-lua'], undefined);
+    assert.equal(removed['mcpServers']['davinci-resolve-lua-mcp-dev'], undefined);
     assert.deepEqual(removed['mcpServers'].other, { command: 'npx', args: ['-y', 'thing'] });
     assert.deepEqual(removed['preferences'], { a: 1 });
 

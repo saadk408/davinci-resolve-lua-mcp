@@ -34,7 +34,7 @@ test('manifest.json tools equal tools/list and the versions agree', async () => 
   assert.equal(pkg.name, SERVER_NAME);
   assert.equal(manifest.version, SERVER_VERSION);
   assert.equal(pkg.version, SERVER_VERSION);
-  assert.equal(manifest.display_name, 'DaVinci Resolve (Lua bridge)');
+  assert.equal(manifest.display_name, 'DaVinci Resolve Lua MCP');
   assert.equal(manifest.server.type, 'node');
   assert.equal(manifest.server.entry_point, 'server/index.js');
   assert.equal(manifest.server.mcp_config.command, 'node');

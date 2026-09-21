@@ -220,7 +220,7 @@ function describeNotAlive(s) {
 // ---- the run ----------------------------------------------------------------------------------
 
 const st = {
-  stateDir: process.env.RLB_STATE_DIR || join(homedir(), '.resolve-lua-bridge'),
+  stateDir: process.env.RLB_STATE_DIR || join(homedir(), '.davinci-resolve-lua-mcp'),
   projectName: undefined,
   smokeId: undefined,
   prevTimelineId: undefined,
@@ -267,12 +267,12 @@ async function smoke() {
   });
   if (!alive) return 1;
 
-  const repoVersion = readFileSync(join(root, 'bridge', 'resolve_lua_bridge.lua'), 'utf8').split('\n')[0].replace(/^--\s*/, '').trim();
+  const repoVersion = readFileSync(join(root, 'bridge', 'resolve_mcp_bridge.lua'), 'utf8').split('\n')[0].replace(/^--\s*/, '').trim();
   const ready = await check('installed bridge script is current and the running loop has the repo version', async () => {
     const outcome = status.bridge_script?.outcome;
-    expect(outcome === 'up_to_date', `self-install outcome ${outcome} (${status.bridge_script?.message}); the loop in Resolve runs an older script: relaunch Workspace > Scripts > resolve_lua_bridge, then rerun`);
+    expect(outcome === 'up_to_date', `self-install outcome ${outcome} (${status.bridge_script?.message}); the loop in Resolve runs an older script: relaunch Workspace > Scripts > resolve_mcp_bridge, then rerun`);
     const running = status.session?.bridge;
-    expect(running === repoVersion, `running bridge is "${running}", the repo is "${repoVersion}": relaunch Workspace > Scripts > resolve_lua_bridge`);
+    expect(running === repoVersion, `running bridge is "${running}", the repo is "${repoVersion}": relaunch Workspace > Scripts > resolve_mcp_bridge`);
     expect(status.state_dir_match !== false, `the bridge uses state dir ${status.session?.state_dir}, the server ${status.state_dir}`);
     return `${repoVersion}, state dir ${st.stateDir}`;
   });

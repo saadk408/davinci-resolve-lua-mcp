@@ -1,6 +1,6 @@
 # What `mcpb pack` leaves out of the bundle (gitignore syntax; no trailing slashes, so the walker
 # prunes a directory at its top instead of testing every file under it). The bundle keeps
-# manifest.json, package.json, server/index.js, bridge/resolve_lua_bridge.lua,
+# manifest.json, package.json, server/index.js, bridge/resolve_mcp_bridge.lua,
 # scripts/claude_diag.lua and README.md. mcpb's own defaults already drop .git, .DS_Store,
 # .gitignore, *.log, *.map, .env*, package-lock.json, tsconfig.json, *.d.ts and *.mcpb, but not
 # node_modules.

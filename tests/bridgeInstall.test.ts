@@ -5,19 +5,19 @@ import * as path from 'node:path';
 import { BRIDGE_FILES, installBridgeFiles, STAMP_TOKEN, stampLua, versionHeader } from '../src/bridgeInstall.js';
 import { exists, makeTempDirs, repoRoot } from './helpers/tmp.js';
 
-const STATE = '/Users/tester/.resolve-lua-bridge';
+const STATE = '/Users/tester/.davinci-resolve-lua-mcp';
 
 test('the bundled Lua files carry the placeholder in exactly two places and the expected headers', async () => {
   for (const f of BRIDGE_FILES) {
     const text = await fsp.readFile(path.join(repoRoot(), f.source), 'utf8');
     assert.equal(text.split(STAMP_TOKEN).length - 1, 2, `${f.source} has two placeholders`);
     assert.equal(text.split('\n')[1], `-- RLB_STATE_DIR=${STAMP_TOKEN}`);
-    assert.match(versionHeader(text), /^-- (resolve_lua_bridge|claude_diag) v\d+\.\d+\.\d+/);
+    assert.match(versionHeader(text), /^-- (resolve_mcp_bridge|claude_diag) v\d+\.\d+\.\d+/);
   }
 });
 
 test('stampLua replaces both sites, keeps the header prefix and refuses unsafe paths', async () => {
-  const bridge = await fsp.readFile(path.join(repoRoot(), 'bridge/resolve_lua_bridge.lua'), 'utf8');
+  const bridge = await fsp.readFile(path.join(repoRoot(), 'bridge/resolve_mcp_bridge.lua'), 'utf8');
   const stamped = stampLua(bridge, STATE);
   assert.ok(!stamped.includes(STAMP_TOKEN));
   assert.equal(stamped.split('\n')[1], `-- RLB_STATE_DIR=${STATE}`);
@@ -35,7 +35,7 @@ test('install, update, up_to_date and re-stamp in a temp Utility folder', async 
     const first = await installBridgeFiles(base);
     assert.equal(first.outcome, 'installed', first.message);
     assert.deepEqual(first.files.map((f) => f.action), ['installed', 'installed']);
-    const target = path.join(dirs.scriptsDir, 'resolve_lua_bridge.lua');
+    const target = path.join(dirs.scriptsDir, 'resolve_mcp_bridge.lua');
     const text = await fsp.readFile(target, 'utf8');
     assert.equal(text.split('\n')[1], `-- RLB_STATE_DIR=${dirs.stateDir}`);
     assert.ok(text.includes(`[==[${dirs.stateDir}]==]`));
@@ -44,7 +44,7 @@ test('install, update, up_to_date and re-stamp in a temp Utility folder', async 
     const second = await installBridgeFiles(base);
     assert.equal(second.outcome, 'up_to_date');
 
-    await fsp.writeFile(target, text.replace(/^-- resolve_lua_bridge v[\d.]+/, '-- resolve_lua_bridge v0.0.1'));
+    await fsp.writeFile(target, text.replace(/^-- resolve_mcp_bridge v[\d.]+/, '-- resolve_mcp_bridge v0.0.1'));
     const third = await installBridgeFiles(base);
     assert.equal(third.outcome, 'updated');
     assert.match(third.files[0]?.reason ?? '', /version header/);
@@ -70,7 +70,7 @@ test('missing folder, permission denied, auto-install off and an unstampable sta
 
     const r2 = await installBridgeFiles({ scriptsDir: dirs.scriptsDir, stateDir: dirs.stateDir, autoInstall: false, bundleDir: repoRoot() });
     assert.equal(r2.outcome, 'skipped_auto_install_off');
-    assert.equal(await exists(path.join(dirs.scriptsDir, 'resolve_lua_bridge.lua')), false);
+    assert.equal(await exists(path.join(dirs.scriptsDir, 'resolve_mcp_bridge.lua')), false);
 
     const r3 = await installBridgeFiles({ scriptsDir: dirs.scriptsDir, stateDir: '/x/]==]', autoInstall: true, bundleDir: repoRoot() });
     assert.equal(r3.outcome, 'state_dir_unstampable');

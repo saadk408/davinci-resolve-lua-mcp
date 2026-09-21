@@ -1,4 +1,4 @@
-# resolve-lua-bridge developer targets (docs/plan.md). Step 2 added the Lua targets, Step 3 the
+# davinci-resolve-lua-mcp developer targets (docs/plan.md). Step 2 added the Lua targets, Step 3 the
 # Node targets (build, test-node, check-server, inspect), Step 4 the bundle and developer-loop targets
 # (bundle, install, sign, dev-register, dev-unregister, uninstall-bridge), Step 5 the live targets
 # (smoke, stop). Node targets source nvm themselves.
@@ -7,7 +7,7 @@ FUSCRIPT := /Applications/DaVinci Resolve/DaVinci Resolve.app/Contents/Libraries
 NVM := . $$HOME/.nvm/nvm.sh >/dev/null 2>&1
 OUT := $(CURDIR)/.out
 MCPB := npx --yes @anthropic-ai/mcpb
-BUNDLE := dist/resolve-lua-bridge.mcpb
+BUNDLE := dist/davinci-resolve-lua-mcp.mcpb
 # The user Utility folder the server installs into; RLB_SCRIPTS_DIR overrides it (uninstall-bridge).
 SCRIPTS_DIR = $(if $(RLB_SCRIPTS_DIR),$(RLB_SCRIPTS_DIR),$(HOME)/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Utility)
 
@@ -25,7 +25,7 @@ test-lua: check-bridge
 	  grep -q '^RLB_TESTS_RESULT: PASS' "$(OUT)/lua-tests.log"
 
 check-bridge:
-	@sh tests/lua/check_bridge.sh bridge/resolve_lua_bridge.lua
+	@sh tests/lua/check_bridge.sh bridge/resolve_mcp_bridge.lua
 
 ## Node tests (node --test through tsx, in temp directories; the two fuscript-backed tests skip
 ## themselves when Resolve is not installed) after the src/ grep gates and the type check.
@@ -95,7 +95,7 @@ dev-unregister:
 ## Remove the two Lua files the server installed, and nothing else, from the user Utility folder
 ## (or from RLB_SCRIPTS_DIR when set).
 uninstall-bridge:
-	@for f in resolve_lua_bridge.lua claude_diag.lua; do \
+	@for f in resolve_mcp_bridge.lua claude_diag.lua; do \
 	  p="$(SCRIPTS_DIR)/$$f"; \
 	  if [ -f "$$p" ]; then rm -f "$$p" && echo "removed $$p"; else echo "not present: $$p"; fi; \
 	done

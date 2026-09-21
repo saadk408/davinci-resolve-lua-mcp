@@ -16,7 +16,7 @@ export interface BridgeFile {
 }
 
 export const BRIDGE_FILES: readonly BridgeFile[] = [
-  { source: 'bridge/resolve_lua_bridge.lua', name: 'resolve_lua_bridge.lua' },
+  { source: 'bridge/resolve_mcp_bridge.lua', name: 'resolve_mcp_bridge.lua' },
   { source: 'scripts/claude_diag.lua', name: 'claude_diag.lua' },
 ];
 
@@ -58,7 +58,7 @@ export interface InstallOptions {
   logger?: Logger | undefined;
 }
 
-/** The first line of a Lua file: `-- resolve_lua_bridge v0.1.0` or `-- claude_diag v0.1.0 (...)`. */
+/** The first line of a Lua file: `-- resolve_mcp_bridge v0.1.0` or `-- claude_diag v0.1.0 (...)`. */
 export function versionHeader(text: string): string {
   const nl = text.indexOf('\n');
   return (nl < 0 ? text : text.slice(0, nl)).replace(/\r$/, '');

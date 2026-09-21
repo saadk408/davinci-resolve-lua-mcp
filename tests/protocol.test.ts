@@ -105,7 +105,7 @@ test('timeout deletes the slot and names the id and both causes; a late answer i
     const id = r.fake.requests[0]?.id ?? '';
     assert.ok(id.length === 32 && err.message.includes(id), err.message);
     assert.match(err.text, /busy on a long synchronous call/);
-    assert.match(err.text, /Workspace > Scripts > resolve_lua_bridge/);
+    assert.match(err.text, /Workspace > Scripts > resolve_mcp_bridge/);
     assert.equal(await exists(path.join(r.dirs.stateDir, REQUEST_FILE)), false);
     await sleep(200); // the late answer for the old id lands now
     const s = await r.client.status();

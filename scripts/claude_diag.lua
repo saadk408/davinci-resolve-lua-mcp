@@ -1,8 +1,8 @@
--- claude_diag v0.1.0 (resolve-lua-bridge, Step 1 viability diagnostic)
+-- claude_diag v0.1.0 (davinci-resolve-lua-mcp, Step 1 viability diagnostic)
 -- RLB_STATE_DIR=@@RLB_STATE_DIR@@
 --
 -- Runs inside DaVinci Resolve's Workspace > Scripts Lua host and measures what that host can do,
--- for the resolve-lua-bridge project (docs/plan.md, Step 1). Output channels, in order:
+-- for the davinci-resolve-lua-mcp project (docs/plan.md, Step 1). Output channels, in order:
 --   1. Fusion prefs: Global.ResolveLuaBridge.RLBDiag = hex(json(results)), via fusion:SetPrefs + SavePrefs
 --   2. Media Pool bins under a "claude_diag" bin in the OPEN project, one sub-bin per finding
 --   3. print() and a file write, both expected to be muted/blocked; their outcome is recorded in 1 and 2
@@ -506,14 +506,14 @@ local function step_state_dir()
   local S = {}; R.state_dir = S
   local cands = {}
   local home = (R.env and type(R.env.HOME) == "string") and R.env.HOME or nil
-  if home and #home > 0 then cands[#cands + 1] = { "HOME", home .. "/.resolve-lua-bridge" } end
+  if home and #home > 0 then cands[#cands + 1] = { "HOME", home .. "/.davinci-resolve-lua-mcp" } end
   if type(STATE_DIR_STAMP) == "string" and #STATE_DIR_STAMP > 0 and STATE_DIR_STAMP:sub(1, 2) ~= "@@" then
     cands[#cands + 1] = { "stamp", STATE_DIR_STAMP }
   end
   local profile = R.fusion and R.fusion.profile
   if type(profile) == "string" then
     local pre = profile:match("^(.-)/Library/")
-    if pre and #pre > 0 then cands[#cands + 1] = { "profile", pre .. "/.resolve-lua-bridge" } end
+    if pre and #pre > 0 then cands[#cands + 1] = { "profile", pre .. "/.davinci-resolve-lua-mcp" } end
   end
   S.candidates = {}
   for i = 1, #cands do

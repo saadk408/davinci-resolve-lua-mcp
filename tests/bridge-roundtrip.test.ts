@@ -22,7 +22,7 @@ test('the bridge loads and validates a server-written request byte for byte', NE
   try {
     const request = path.join(dirs.stateDir, 'next.lua');
     await fsp.writeFile(request, formatRequest({ id: 'roundtrip01', session: 'sess-abc', op: 'run', ts: 1758412345, maxKb: 96, code: HOSTILE_CODE }), 'utf8');
-    const bridge = path.join(repoRoot(), 'bridge', 'resolve_lua_bridge.lua');
+    const bridge = path.join(repoRoot(), 'bridge', 'resolve_mcp_bridge.lua');
     const script = [
       `local M = assert(loadfile(${JSON.stringify(bridge)}))("RLB_BRIDGE_TESTING")`,
       `local req, err = M.load_request(${JSON.stringify(request)})`,

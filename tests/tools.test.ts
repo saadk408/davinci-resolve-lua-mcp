@@ -114,11 +114,11 @@ test('tools/list: exactly the 15 tools, each with title, hints and openWorldHint
       assert.equal(byName[n]?.destructiveHint, false, `${n} not destructive`);
     }
     const instructions = r.client.getInstructions() ?? '';
-    assert.match(instructions, /Workspace > Scripts > resolve_lua_bridge/);
+    assert.match(instructions, /Workspace > Scripts > resolve_mcp_bridge/);
     assert.match(instructions, /scripting_api_docs/);
     assert.match(instructions, /confirm=true/);
     assert.match(instructions, /get_render_status/);
-    assert.equal(r.client.getServerVersion()?.name, 'resolve-lua-bridge');
+    assert.equal(r.client.getServerVersion()?.name, 'davinci-resolve-lua-mcp');
   } finally {
     await r.close();
   }
@@ -135,7 +135,7 @@ test('resolve_status without a bridge is a normal result that says never started
     assert.equal(s['start_instruction'], START_INSTRUCTION);
     assert.deepEqual(s['config_problems'], []);
     assert.equal((s['bridge_script'] as InstallResult).outcome, 'up_to_date');
-    assert.equal((s['server'] as { name: string }).name, 'resolve-lua-bridge');
+    assert.equal((s['server'] as { name: string }).name, 'davinci-resolve-lua-mcp');
     assert.ok(text(res).includes('"alive": false'));
     assert.equal(r.bridge.calls.length, 0, 'no run when not alive');
   } finally {
