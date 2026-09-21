@@ -6,7 +6,7 @@ SHELL := /bin/zsh
 FUSCRIPT := /Applications/DaVinci Resolve/DaVinci Resolve.app/Contents/Libraries/Fusion/fuscript
 NVM := . $$HOME/.nvm/nvm.sh >/dev/null 2>&1
 OUT := $(CURDIR)/.out
-MCPB := npx --yes @anthropic-ai/mcpb
+MCPB := ./node_modules/.bin/mcpb
 BUNDLE := dist/davinci-resolve-lua-mcp.mcpb
 # The user Utility folder the server installs into; RLB_SCRIPTS_DIR overrides it (uninstall-bridge).
 SCRIPTS_DIR = $(if $(RLB_SCRIPTS_DIR),$(RLB_SCRIPTS_DIR),$(HOME)/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Utility)
@@ -67,12 +67,12 @@ lint-lua:
 gen-types:
 	@$(NVM) && node scripts/gen-types.mjs
 
-## Validate the manifest, pack the bundle (what .mcpbignore leaves in), print it, then gate it with
+## Validate the manifest and the icon (mcpb validate on the directory), pack the bundle (what .mcpbignore leaves in), print it, then gate it with
 ## tests/check_bundle.sh (exact file list, size under 2 MB, unpack + tools/list probe under a temp
 ## state dir with the self-install off). Packs differ byte-wise (zip mtime); compare `zipinfo -1`.
 bundle: build
 	@mkdir -p dist
-	@$(NVM) && $(MCPB) validate manifest.json && $(MCPB) pack . $(BUNDLE) && $(MCPB) info $(BUNDLE)
+	@$(NVM) && $(MCPB) validate . && $(MCPB) pack . $(BUNDLE) && $(MCPB) info $(BUNDLE)
 	@$(NVM) && sh tests/check_bundle.sh $(BUNDLE)
 
 ## Open the bundle so Claude Desktop shows its install dialog; the click is the user's (Step 5).
