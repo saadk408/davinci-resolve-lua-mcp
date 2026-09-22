@@ -3,9 +3,16 @@ import assert from 'node:assert/strict';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import { BRIDGE_FILES, installBridgeFiles, STAMP_TOKEN, stampLua, versionHeader } from '../src/bridgeInstall.js';
+import { loadConfig } from '../src/config.js';
 import { exists, makeTempDirs, repoRoot } from './helpers/tmp.js';
 
 const STATE = '/Users/tester/.davinci-resolve-lua-mcp';
+
+/**
+ * The spelling main.ts stamps: config.stateDir, which loadConfig writes with forward slashes on
+ * win32 (the installer refuses a native `D:\...` temp path, by design). Unchanged on macOS.
+ */
+const stampDir = (dir: string): string => loadConfig({ RLB_STATE_DIR: dir }, path.dirname(dir)).stateDir;
 
 test('the bundled Lua files carry the placeholder in exactly two places and the expected headers', async () => {
   for (const f of BRIDGE_FILES) {
@@ -56,14 +63,15 @@ test('a Windows state dir is stamped in its forward-slash spelling; the backslas
 test('install, update, up_to_date and re-stamp in a temp Utility folder', async () => {
   const dirs = await makeTempDirs();
   try {
-    const base = { scriptsDir: dirs.scriptsDir, stateDir: dirs.stateDir, autoInstall: true, bundleDir: repoRoot() };
+    const stateDir = stampDir(dirs.stateDir);
+    const base = { scriptsDir: dirs.scriptsDir, stateDir, autoInstall: true, bundleDir: repoRoot() };
     const first = await installBridgeFiles(base);
     assert.equal(first.outcome, 'installed', first.message);
     assert.deepEqual(first.files.map((f) => f.action), ['installed', 'installed']);
     const target = path.join(dirs.scriptsDir, 'resolve_mcp_bridge.lua');
     const text = await fsp.readFile(target, 'utf8');
-    assert.equal(text.split('\n')[1], `-- RLB_STATE_DIR=${dirs.stateDir}`);
-    assert.ok(text.includes(`[==[${dirs.stateDir}]==]`));
+    assert.equal(text.split('\n')[1], `-- RLB_STATE_DIR=${stateDir}`);
+    assert.ok(text.includes(`[==[${stateDir}]==]`));
     assert.equal(await exists(`${target}.tmp`), false);
 
     const second = await installBridgeFiles(base);
@@ -75,10 +83,11 @@ test('install, update, up_to_date and re-stamp in a temp Utility folder', async 
     assert.match(third.files[0]?.reason ?? '', /version header/);
     assert.equal(await fsp.readFile(target, 'utf8'), text);
 
-    const moved = await installBridgeFiles({ ...base, stateDir: path.join(dirs.root, 'elsewhere') });
+    const elsewhere = stampDir(path.join(dirs.root, 'elsewhere'));
+    const moved = await installBridgeFiles({ ...base, stateDir: elsewhere });
     assert.equal(moved.outcome, 'updated');
     assert.match(moved.files[0]?.reason ?? '', /stamp/);
-    assert.ok((await fsp.readFile(target, 'utf8')).includes(path.join(dirs.root, 'elsewhere')));
+    assert.ok((await fsp.readFile(target, 'utf8')).includes(elsewhere));
   } finally {
     await dirs.cleanup();
   }
@@ -87,27 +96,28 @@ test('install, update, up_to_date and re-stamp in a temp Utility folder', async 
 test('missing folder, permission denied, auto-install off and an unstampable state dir are reported, never fixed', async () => {
   const dirs = await makeTempDirs();
   try {
+    const stateDir = stampDir(dirs.stateDir);
     const missing = path.join(dirs.root, 'no-such', 'Utility');
-    const r1 = await installBridgeFiles({ scriptsDir: missing, stateDir: dirs.stateDir, autoInstall: true, bundleDir: repoRoot() });
+    const r1 = await installBridgeFiles({ scriptsDir: missing, stateDir, autoInstall: true, bundleDir: repoRoot() });
     assert.equal(r1.outcome, 'scripts_dir_missing');
     assert.equal(await exists(missing), false, 'never creates Resolve folders');
     assert.match(r1.message, /never creates/);
 
-    const r2 = await installBridgeFiles({ scriptsDir: dirs.scriptsDir, stateDir: dirs.stateDir, autoInstall: false, bundleDir: repoRoot() });
+    const r2 = await installBridgeFiles({ scriptsDir: dirs.scriptsDir, stateDir, autoInstall: false, bundleDir: repoRoot() });
     assert.equal(r2.outcome, 'skipped_auto_install_off');
     assert.equal(await exists(path.join(dirs.scriptsDir, 'resolve_mcp_bridge.lua')), false);
 
     const r3 = await installBridgeFiles({ scriptsDir: dirs.scriptsDir, stateDir: '/x/]==]', autoInstall: true, bundleDir: repoRoot() });
     assert.equal(r3.outcome, 'state_dir_unstampable');
 
-    const r4 = await installBridgeFiles({ scriptsDir: dirs.scriptsDir, stateDir: dirs.stateDir, autoInstall: true, bundleDir: path.join(dirs.root, 'nowhere') });
+    const r4 = await installBridgeFiles({ scriptsDir: dirs.scriptsDir, stateDir, autoInstall: true, bundleDir: path.join(dirs.root, 'nowhere') });
     assert.equal(r4.outcome, 'error');
     assert.match(r4.message, /bundled/);
 
     if (process.getuid && process.getuid() !== 0) {
       await fsp.chmod(dirs.scriptsDir, 0o500);
       try {
-        const r5 = await installBridgeFiles({ scriptsDir: dirs.scriptsDir, stateDir: dirs.stateDir, autoInstall: true, bundleDir: repoRoot() });
+        const r5 = await installBridgeFiles({ scriptsDir: dirs.scriptsDir, stateDir, autoInstall: true, bundleDir: repoRoot() });
         assert.equal(r5.outcome, 'permission_denied', r5.message);
       } finally {
         await fsp.chmod(dirs.scriptsDir, 0o700);
