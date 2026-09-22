@@ -13,6 +13,7 @@ test('the bundled Lua files carry the placeholder in exactly two places and the 
     assert.equal(text.split(STAMP_TOKEN).length - 1, 2, `${f.source} has two placeholders`);
     assert.equal(text.split('\n')[1], `-- RLB_STATE_DIR=${STAMP_TOKEN}`);
     assert.match(versionHeader(text), /^-- (resolve_mcp_bridge|claude_diag) v\d+\.\d+\.\d+/);
+    assert.ok(!text.includes('\r'), `${f.source} is LF-only (.gitattributes)`);
   }
 });
 
@@ -26,6 +27,27 @@ test('stampLua replaces both sites, keeps the header prefix and refuses unsafe p
   assert.throws(() => stampLua(bridge, '/x/"'), /quote/);
   assert.throws(() => stampLua(bridge, '/x/\n'), /line break/);
   assert.throws(() => stampLua('no placeholder', STATE), /placeholder/);
+});
+
+test('a Windows state dir is stamped in its forward-slash spelling; the backslash spelling is refused', async () => {
+  const win = 'C:/Users/Tester/.davinci-resolve-lua-mcp';
+  const bridge = await fsp.readFile(path.join(repoRoot(), 'bridge/resolve_mcp_bridge.lua'), 'utf8');
+  const stamped = stampLua(bridge, win);
+  assert.equal(stamped.split('\n')[1], `-- RLB_STATE_DIR=${win}`);
+  assert.ok(stamped.includes(`local STATE_DIR_STAMP = [==[${win}]==]`));
+  assert.throws(() => stampLua(bridge, 'C:\\Users\\Tester\\.davinci-resolve-lua-mcp'), /backslash/);
+  // The state dir is only stamped, never opened, so this runs on any platform.
+  const dirs = await makeTempDirs();
+  try {
+    const first = await installBridgeFiles({ scriptsDir: dirs.scriptsDir, stateDir: win, autoInstall: true, bundleDir: repoRoot() });
+    assert.equal(first.outcome, 'installed', first.message);
+    const text = await fsp.readFile(path.join(dirs.scriptsDir, 'resolve_mcp_bridge.lua'), 'utf8');
+    assert.ok(text.includes(`[==[${win}]==]`));
+    const again = await installBridgeFiles({ scriptsDir: dirs.scriptsDir, stateDir: win, autoInstall: true, bundleDir: repoRoot() });
+    assert.equal(again.outcome, 'up_to_date', again.message);
+  } finally {
+    await dirs.cleanup();
+  }
 });
 
 test('install, update, up_to_date and re-stamp in a temp Utility folder', async () => {

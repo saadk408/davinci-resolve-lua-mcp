@@ -6,7 +6,7 @@ import * as path from 'node:path';
 import { McpServer, type CallToolResult } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 import type { Config } from './config.js';
-import { expandHome, TIMEOUT_MAX_S, TIMEOUT_MIN_S } from './config.js';
+import { expandHome, isAsciiPath, TIMEOUT_MAX_S, TIMEOUT_MIN_S } from './config.js';
 import type { InstallResult } from './bridgeInstall.js';
 import type { DocsIndex } from './docsSearch.js';
 import type { Logger } from './log.js';
@@ -51,7 +51,7 @@ export const TOOL_NAMES = [
 ] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];
 
-export const INSTRUCTIONS = `These tools control DaVinci Resolve 21.1 (free edition) on this Mac through a Lua script that runs inside Resolve (the "bridge"). The bridge must be running: when a tool answers "bridge not running", the user has to open a project in Resolve and click Workspace > Scripts > resolve_mcp_bridge (Resolve's Console shows nothing; that is expected), then the call can be retried. resolve_status reports whether the bridge is alive and why not.
+export const INSTRUCTIONS = `These tools control DaVinci Resolve 21.1 (free edition) on this computer through a Lua script that runs inside Resolve (the "bridge"). The bridge must be running: when a tool answers "bridge not running", the user has to open a project in Resolve and click Workspace > Scripts > resolve_mcp_bridge (Resolve's Console shows nothing; that is expected), then the call can be retried. resolve_status reports whether the bridge is alive and why not.
 
 Prefer the purpose-built tools; use run_lua for anything they do not cover. Before writing Lua, look the method up with scripting_api_docs, and avoid the deprecated forms Blackmagic's shipped examples still use (GetSetting/SetSetting, GetItemsInTrack, index-based render-job calls, single-argument GetClipProperty).
 
@@ -192,13 +192,14 @@ export function createServer(deps: ServerDeps): McpServer {
     {
       title: 'Bridge status',
       description:
-        'Reports whether the in-Resolve Lua bridge is running and reachable, with the reason when it is not (never started, stopped, Resolve gone, no reply, lock held), the bridge session (pid, start time, state directory), the self-install outcome of the two Lua scripts, configuration problems, and, when alive, the Resolve product, version, edition (Studio or free), current page and open project. Read-only; it does not start the bridge (only a click in Resolve can).',
+        'Reports whether the in-Resolve Lua bridge is running and reachable, with the reason when it is not (never started, stopped, Resolve gone, no reply, lock held), the bridge session (pid, start time, state directory), the platform, the self-install outcome of the two Lua scripts, configuration problems, and, when alive, the Resolve product, version, edition (Studio or free), current page and open project. Read-only; it does not start the bridge (only a click in Resolve can).',
       inputSchema: z.object({}),
       outputSchema: z.looseObject({
         alive: z.boolean(),
         reason: z.string().optional(),
         start_instruction: z.string().optional(),
         state_dir: z.string(),
+        platform: z.string(),
         config_problems: z.array(z.string()),
       }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -223,6 +224,9 @@ export function createServer(deps: ServerDeps): McpServer {
         ping_ms: status.ping_ms ?? null,
         lock: status.lock,
         state_dir: status.state_dir,
+        // win32: LuaJIT opens files through the ANSI C library, so a non-ASCII state dir may be unreachable from Lua.
+        state_dir_ascii: isAsciiPath(config.stateDir),
+        platform: config.platform,
         state_dir_match: status.state_dir_match ?? null,
         bridge_script: install,
         config: {
@@ -537,7 +541,7 @@ export function createServer(deps: ServerDeps): McpServer {
     },
     async ({ preset, output_dir, filename }) =>
       guard('render_current_timeline', async () => {
-        const dir = expandHome(output_dir.trim(), process.env['HOME'] ?? '');
+        const dir = expandHome(output_dir.trim(), config.home, config.platform);
         if (!path.isAbsolute(dir)) return fail(`output_dir must be an absolute path, got ${JSON.stringify(output_dir)}`);
         try {
           const st = await fsp.stat(dir);

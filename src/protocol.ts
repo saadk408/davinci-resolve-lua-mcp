@@ -422,7 +422,7 @@ export class BridgeClient implements Bridge {
       throw new BridgeError(
         'prefs_missing',
         `no Fusion.prefs under ${this.prefsDir}`,
-        'check that DaVinci Resolve has been launched at least once on this Mac, or set RLB_PREFS_DIR to its Fusion/Profiles folder',
+        'check that DaVinci Resolve has been launched at least once on this computer, or set RLB_PREFS_DIR (the Fusion prefs folder setting) to its Fusion/Profiles folder (macOS: ~/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Profiles; Windows: %APPDATA%\\Blackmagic Design\\DaVinci Resolve\\Support\\Fusion\\Profiles)',
         { prefs_dir: this.prefsDir },
       );
     }

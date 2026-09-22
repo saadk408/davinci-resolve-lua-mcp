@@ -134,6 +134,8 @@ test('resolve_status without a bridge is a normal result that says never started
     assert.equal(s['reason'], 'never_started');
     assert.equal(s['start_instruction'], START_INSTRUCTION);
     assert.deepEqual(s['config_problems'], []);
+    assert.equal(s['platform'], process.platform);
+    assert.equal(s['state_dir_ascii'], true);
     assert.equal((s['bridge_script'] as InstallResult).outcome, 'up_to_date');
     assert.equal((s['server'] as { name: string }).name, 'davinci-resolve-lua-mcp');
     assert.ok(text(res).includes('"alive": false'));
@@ -339,6 +341,10 @@ test('render_current_timeline validates the output directory and file name befor
     const missing = await r.client.callTool({ name: 'render_current_timeline', arguments: { output_dir: path.join(r.dirs.root, 'nope'), filename: 'out' } });
     assert.equal(missing.isError, true);
     assert.match(text(missing), /does not exist/);
+    // `~` resolves through config.home (the rig's loadConfig home is dirs.root), never $HOME.
+    const tilde = await r.client.callTool({ name: 'render_current_timeline', arguments: { output_dir: '~/nope-tilde', filename: 'out' } });
+    assert.equal(tilde.isError, true);
+    assert.ok(text(tilde).includes(path.join(r.dirs.root, 'nope-tilde')), text(tilde));
     const file = path.join(r.dirs.root, 'afile');
     await fsp.writeFile(file, 'x');
     const notDir = await r.client.callTool({ name: 'render_current_timeline', arguments: { output_dir: file, filename: 'out' } });
