@@ -1,4 +1,4 @@
--- claude_diag v0.1.0 (davinci-resolve-lua-mcp sandbox diagnostic)
+-- claude_diag v0.2.0 (davinci-resolve-lua-mcp sandbox diagnostic)
 -- RLB_STATE_DIR=@@RLB_STATE_DIR@@
 --
 -- Runs inside DaVinci Resolve's Workspace > Scripts Lua host and measures what that host can do,
@@ -13,7 +13,7 @@
 local STATE_DIR_STAMP = [==[@@RLB_STATE_DIR@@]==]   -- substituted at copy time (long bracket: a quote or backslash is safe); unreplaced or "" means: build from HOME/USERPROFILE
 local CLEANUP = false                          -- true: delete the claude_diag bin at the end (DeleteFolders)
 local PREFIX = "Global.ResolveLuaBridge."
-local SCRIPT = "claude_diag v0.1.0"
+local SCRIPT = "claude_diag v0.2.0"
 
 local R = { script = SCRIPT, bins = {}, saves = {}, errors = {} }
 local resolve_obj, fusion_obj, pm, project, mediaPool, rootBin, diagBin

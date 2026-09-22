@@ -6,7 +6,7 @@ import { decodeHex, extractResp, extractSessionHex, findPrefsFile, parseEnvelope
 import { hex, renderPrefs } from './helpers/fakeBridge.js';
 import { makeTempDirs, sleep } from './helpers/tmp.js';
 
-const ENVELOPE = { v: 1, id: 'abc', session: 's1', op: 'run', ok: true, ms: 3, prints: [], result: { a: 1 }, bridge: 'resolve_mcp_bridge v0.1.0' };
+const ENVELOPE = { v: 1, id: 'abc', session: 's1', op: 'run', ok: true, ms: 3, prints: [], result: { a: 1 }, bridge: 'resolve_mcp_bridge v0.2.0' };
 
 test('extractResp finds the value despite hash order, hostile neighbours and a near-miss key', () => {
   const text = renderPrefs({ RLBResp: `abc:${hex(JSON.stringify(ENVELOPE))}`, RLBSession: hex('{"session":"s1","state":"running"}') });

@@ -1,11 +1,14 @@
 {
   "name": "davinci-resolve-lua-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Control the free edition of DaVinci Resolve 21.1 from Claude through a Lua script that runs inside Resolve. macOS and Windows (experimental), no Studio licence, no network.",
   "license": "MIT",
   "author": "Saad Khan",
-  "repository": { "type": "git", "url": "git+https://github.com/saadk408/davinci-resolve-lua-mcp.git" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/saadk408/davinci-resolve-lua-mcp.git"
+  },
   "homepage": "https://github.com/saadk408/davinci-resolve-lua-mcp#readme",
   "bugs": "https://github.com/saadk408/davinci-resolve-lua-mcp/issues",
   "engines": {

@@ -1,4 +1,4 @@
--- resolve_mcp_bridge v0.1.0
+-- resolve_mcp_bridge v0.2.0
 -- RLB_STATE_DIR=@@RLB_STATE_DIR@@
 -- The in-Resolve half of davinci-resolve-lua-mcp (protocol v1). Launched from
 -- Workspace > Scripts, it polls <state_dir>/next.lua, runs the chunk a request carries, and answers
@@ -10,7 +10,7 @@
 
 local MODE = ...
 
-local VERSION = "0.1.0"
+local VERSION = "0.2.0"
 local BRIDGE = "resolve_mcp_bridge v" .. VERSION
 local STATE_DIR_STAMP = [==[@@RLB_STATE_DIR@@]==] -- server-stamped at copy time; long bracket: quotes are safe
 local PREFIX = "Global.ResolveLuaBridge."

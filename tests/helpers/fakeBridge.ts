@@ -8,7 +8,7 @@ import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import { retryTransient } from '../../src/protocol.js';
 
-export const BRIDGE_TAG = 'resolve_mcp_bridge v0.1.0';
+export const BRIDGE_TAG = 'resolve_mcp_bridge v0.2.0';
 
 export interface ParsedRequest {
   v: number;

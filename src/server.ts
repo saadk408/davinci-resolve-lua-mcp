@@ -30,7 +30,7 @@ import type { Envelope } from './prefs.js';
 import { BridgeError, START_INSTRUCTION, type Bridge } from './protocol.js';
 
 export const SERVER_NAME = 'davinci-resolve-lua-mcp';
-export const SERVER_VERSION = '0.1.0';
+export const SERVER_VERSION = '0.2.0';
 
 export const TOOL_NAMES = [
   'resolve_status',
