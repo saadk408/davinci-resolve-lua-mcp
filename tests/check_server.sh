@@ -23,9 +23,14 @@ done
 # hole may sit inside a Lua quoted string in lua.ts.
 if strip "$D/lua.ts" | grep -q -E '"[^"]*\$\{[^}]*\}[^"]*"' ; then bad "lua.ts embeds a raw value inside a quoted Lua string"; fi
 
-# A private instrumented build lives in another repository: its vendor name
-# must never appear in the public sources, package.json or manifest.json (comments included).
-if grep -qil sentry "$D"/*.ts "$D/../package.json" "$D/../manifest.json"; then bad "the word sentry appears in $D, package.json or manifest.json (the private build's code must not enter this repository)"; fi
+# A private instrumented build lives in another repository: its vendor name must never appear in
+# any tracked file of this one (comments and docs included), except the two gates that spell it,
+# this file and tests/check_bundle.mjs. `git ls-files` covers docs, tests, .claude and everything
+# a grep of src/ would miss; outside a git checkout the gate falls back to the shipped sources.
+vendor_hits="$( (cd "$D/.." && { git ls-files -z 2>/dev/null || printf '%s\0' src/*.ts package.json manifest.json; }) \
+  | tr '\0' '\n' | grep -v -E '^tests/(check_server\.sh|check_bundle\.mjs)$' | tr '\n' '\0' \
+  | (cd "$D/.." && xargs -0 grep -Iil sentry 2>/dev/null) )"
+if [ -n "$vendor_hits" ]; then bad "the word sentry appears in: $(printf '%s' "$vendor_hits" | tr '\n' ' ')(the private build's code must not enter this repository)"; fi
 
 if [ "$fail" -eq 0 ]; then echo "check_server: OK"; fi
 exit "$fail"

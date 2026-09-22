@@ -1,20 +1,33 @@
 # Release on a version tag. tests.yml runs on branch pushes and pull requests only, so a tag push
 # gets no gate from it: this workflow re-runs the Node gates (make test-node) and the bundle gate
 # (make bundle) on the tagged commit before anything is published. The Lua tests and `make smoke`
-# need DaVinci Resolve and stay local: `make test` and the smoke run precede the tag.
+# need DaVinci Resolve and stay local: `make test` and the smoke run precede the tag. Only the
+# repository admin role can create a `v*` tag (tag ruleset), so nobody else can start this.
 #
 # Every `mcpb pack` gives different bytes (zip mtimes), so a published tag is never re-run: the
-# guard below and `gh release create` both refuse when a release for the tag exists. Fix forward
-# and cut a new tag. gh uploads the asset into a draft and deletes the draft on failure, so a
-# failure before "Publish" leaves nothing behind and a re-run is safe only then. GitHub marks the
-# release "Latest" on its own (higher version, later date), which is what
-# releases/latest/download/davinci-resolve-lua-mcp.mcpb follows.
+# guard below and `gh release create` both refuse when a release for the tag exists, and releases
+# are immutable (the tag and the asset cannot change after publishing; the notes still can). Fix
+# forward and cut a new tag. gh uploads the asset into a draft and deletes the draft on failure,
+# so a failure before "Publish" leaves nothing behind and a re-run is safe only then. GitHub marks
+# the release "Latest" on its own (higher version, later date), which is what
+# releases/latest/download/davinci-resolve-lua-mcp.mcpb follows; the fixed concurrency group keeps
+# two tags pushed back to back in order and never cancels a release run.
+#
+# Before publishing, actions/attest-build-provenance records which workflow run built the bundle
+# (Sigstore, public transparency log): the pack is not reproducible, so the attestation is the only
+# cryptographic link from the served bytes to this run. Anyone verifies a download with
+# `gh attestation verify davinci-resolve-lua-mcp.mcpb -R <owner>/davinci-resolve-lua-mcp`.
 #
 # The second job publishes the release to the MCP Registry (registry.modelcontextprotocol.io) as
 # io.github.<owner>/davinci-resolve-lua-mcp. It hashes the asset the GitHub Release serves, not the
 # packed file, so the hash is the one clients verify against the download, and it can be re-run on
 # its own (`gh run rerun <run-id> --failed`) without touching the release. GitHub OIDC proves the
-# io.github.<owner> namespace; no secret is involved.
+# io.github.<owner> namespace; no secret is involved. mcp-publisher is pinned to a release and to
+# the sha256 of its linux_amd64 tarball (ubuntu-latest is x86_64): to upgrade, set both from the
+# `registry_<version>_checksums.txt` asset of the new release.
+#
+# Every action is pinned to a full commit SHA (the repository setting `sha_pinning_required`
+# refuses a tag); Dependabot refreshes the pin and the `# vN` comment.
 name: release
 
 on:
@@ -30,15 +43,21 @@ env:
   GH_TOKEN: ${{ github.token }}
   GH_REPO: ${{ github.repository }}
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: macos-latest
     timeout-minutes: 30
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 20
           cache: npm
@@ -59,6 +78,10 @@ jobs:
       - run: npm ci
       - run: make test-node
       - run: make bundle
+      - name: Build provenance attestation of the bundle
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ env.BUNDLE }}
       - name: Release notes
         run: |
           TAG="$GITHUB_REF_NAME" bash scripts/release-notes.sh "$BUNDLE" > "$RUNNER_TEMP/notes.md"
@@ -73,9 +96,12 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    env:
+      MCP_PUBLISHER_VERSION: v1.8.1
+      MCP_PUBLISHER_SHA256: a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc # mcp-publisher_linux_amd64.tar.gz
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 20
       - name: Registry entry from the published asset
@@ -85,8 +111,11 @@ jobs:
           sha="$(shasum -a 256 "$RUNNER_TEMP/$asset" | cut -d' ' -f1)"
           node scripts/registry-entry.mjs "$GITHUB_REF_NAME" "$sha" "${{ github.repository_id }}" > "$RUNNER_TEMP/server.json"
           cat "$RUNNER_TEMP/server.json"
-      - name: Install mcp-publisher
-        run: curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+      - name: Install mcp-publisher (pinned release, checksum verified)
+        run: |
+          curl -fsSL -o mcp-publisher.tar.gz "https://github.com/modelcontextprotocol/registry/releases/download/$MCP_PUBLISHER_VERSION/mcp-publisher_linux_amd64.tar.gz"
+          echo "$MCP_PUBLISHER_SHA256  mcp-publisher.tar.gz" | sha256sum -c -
+          tar xzf mcp-publisher.tar.gz mcp-publisher
       - name: Publish to the MCP Registry
         run: |
           ./mcp-publisher validate "$RUNNER_TEMP/server.json"

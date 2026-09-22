@@ -18,10 +18,11 @@ documented-not-measured until the checklist in `docs/windows.md` has been run by
 
 `README.md` is the user documentation (install, start and stop, the 15-tool table with the `run_lua`
 guide, the settings and `RLB_*` variables, troubleshooting, security, uninstall, the make targets);
-do not repeat it here. `SECURITY.md` is the reporting policy; `PRIVACY.md` is the privacy policy the
-extension directory requires (linked by the manifest's `privacy_policies` and the README's Privacy
-Policy section; neither ships in the bundle). The planning documents were removed before release,
-so this file and the code comments are the design record.
+do not repeat it here. `CONTRIBUTING.md` is the contributor guide (branch flow, the gate, the
+release steps, the developer loop). `SECURITY.md` is the reporting policy; `PRIVACY.md` is the
+privacy policy the extension directory requires (linked by the manifest's `privacy_policies` and
+the README's Privacy Policy section; none of the three ships in the bundle). The planning documents
+were removed before release, so this file and the code comments are the design record.
 
 ## Rules
 
@@ -61,6 +62,10 @@ Not negotiable without the user's say-so.
 - Where Blackmagic's docs are silent (the host's libraries, `bmd.*`, `fusion:*Prefs`, the sandbox),
   say so and rely on the measurements under "Resolve: measured facts".
 - Run `make test` before a commit; commit after each unit of work with a clear message.
+- Nothing is pushed to `main` directly: every change is a pull request from a short-lived branch,
+  squash-merged once the three CI checks pass (a ruleset enforces it, with no bypass; the PR body
+  is the commit message). A version bump is its own release PR, and the tag goes on that PR's
+  merge commit, never on whatever `main` moved to since.
 
 ## Environment traps
 
@@ -120,11 +125,13 @@ bridge/resolve_mcp_bridge.lua (Scripts-menu Lua state, holds live `resolve`)
 - Layout: `src/` (ten modules; `main.ts` is the wiring, `server.ts` the tools, `lua.ts` the snippets,
   `protocol.ts` the slot and lock, `prefs.ts` the reader, `bridgeInstall.ts` the self-install),
   `server/index.js` (built, git-ignored, shipped), `bridge/resolve_mcp_bridge.lua`, `scripts/`
-  (`claude_diag.lua` ships; `gen-types.mjs`, `dev-register.mjs`, `smoke.mjs`, `release-notes.sh`,
-  `registry-entry.mjs` are developer-only), `types/resolve_host.d.lua` + `.luarc.json` (Lua LSP),
-  `tests/`, `docs/` (`windows.md`, the Windows assumptions and measurement checklist; `images/`, README
-  screenshots; the MP4 recordings are git-ignored, GitHub-hosted), `.github/workflows/`
-  (`tests.yml`, `release.yml`), `SECURITY.md`, `PRIVACY.md`, `.gitattributes` (every text file LF).
+  (`claude_diag.lua` ships; `gen-types.mjs`, `dev-register.mjs`, `set-version.mjs`, `smoke.mjs`,
+  `release-notes.sh`, `registry-entry.mjs` are developer-only), `types/resolve_host.d.lua` +
+  `.luarc.json` (Lua LSP), `tests/`, `docs/` (`windows.md`, the Windows assumptions and measurement
+  checklist; `images/`, README screenshots; the MP4 recordings are git-ignored, GitHub-hosted),
+  `.github/` (`workflows/tests.yml`, `workflows/release.yml`, `dependabot.yml`,
+  `pull_request_template.md`), `CONTRIBUTING.md`, `SECURITY.md`, `PRIVACY.md`, `.gitattributes`
+  (every text file LF).
   `tsconfig.json` covers `src/` and `tests/` only. The bundle is exactly the eight files allowlisted
   in `tests/check_bundle.mjs`; anything new goes into `.mcpbignore` (directories without trailing
   slashes: `mcpb pack` walks with the `ignore` package after built-in excludes that do not cover
@@ -162,35 +169,72 @@ Targets (`Makefile`; the README has the table): `test` = `test-lua` + `test-node
   dirs with the self-install off. Two packs give the same file list but different bytes (zip mtime);
   compare with `zipinfo -1`. `make sign` is optional and self-signed.
 - `make dev-register` merges a `davinci-resolve-lua-mcp-dev` entry into the real config after backing
-  it up (flags in the script). A code change then needs `make build` and a Claude Desktop restart.
+  it up (flags in the script; `--server <path>` registers another checkout's build under the same
+  key, replacing the previous entry). A code change then needs `make build` and a Claude Desktop
+  restart. The dev entry and the installed extension answer to the same tool names: disable one
+  while testing the other.
 - CI (`.github/workflows/tests.yml`) runs `make test-node` and `make bundle` on macOS with Node 20
   and 24, plus a `windows-latest` job with Node 20 and no make (`npm ci`, `bash tests/check_server.sh
   src`, `bash tests/lua/check_bridge.sh`, `npm run typecheck`, `npm run build`, `node --import tsx
   --test tests/*.test.ts` under Git Bash so the glob expands, `npm run bundle`); `.gitattributes`
   forces LF because the runner's Git has `core.autocrlf=true`. Both run for branch pushes and pull
-  requests and ignore tag pushes. `release.yml` stays macOS: the bundle is platform-neutral JS + Lua,
-  one file serves both platforms, and the registry entry has no platform field. `release.yml` runs
-  on a `v*` tag push: a guard that the tag equals `v` + the `package.json` and `manifest.json`
-  versions, a guard that no release exists for the tag, `make test-node`, `make bundle`,
-  `scripts/release-notes.sh`, then `gh release create` with the bundle attached (the README's
-  `releases/latest/download/...` link follows it). A second job then publishes the release to the
-  MCP Registry as `io.github.saadk408/davinci-resolve-lua-mcp`: it downloads the asset the release
-  serves, hashes it, generates `server.json` with `scripts/registry-entry.mjs` (nothing is
+  requests and ignore tag pushes. The job names `node 20`, `node 24` and `windows node 20` are the
+  required status checks of the `main` ruleset: renaming one blocks every PR until the ruleset is
+  edited. Every `uses:` is pinned to a full commit SHA with a `# vN` comment and the repository
+  setting `sha_pinning_required` refuses a tag (a `release/X.Y.x` branch cut from a tag older than
+  the pins needs that commit cherry-picked first); `.github/dependabot.yml` refreshes the pins and
+  the npm devDependencies weekly in grouped PRs, `@types/node` majors ignored on purpose.
+  `tests.yml` cancels a superseded run of the same ref; `release.yml` queues under one fixed
+  `release` group and never cancels. `release.yml` stays macOS: the bundle is platform-neutral JS
+  + Lua, one file serves both platforms, and the registry entry has no platform field.
+  `release.yml` runs on a `v*` tag push (only the admin role may create one, tag ruleset): a guard
+  that the tag equals `v` + the `package.json` and `manifest.json` versions, a guard that no
+  release exists for the tag, `make test-node`, `make bundle`, a build-provenance attestation of
+  the bundle (`actions/attest-build-provenance`, with `id-token` and `attestations` permissions;
+  the pack is not reproducible, so this is the only cryptographic link from the served bytes to
+  the run), `scripts/release-notes.sh`, then `gh release create` with the bundle attached (the
+  README's `releases/latest/download/...` link follows it; releases are immutable, so the tag and
+  the asset cannot change afterwards, only the notes). A second job then publishes the release to
+  the MCP Registry as `io.github.saadk408/davinci-resolve-lua-mcp`: it downloads the asset the
+  release serves, hashes it, generates `server.json` with `scripts/registry-entry.mjs` (nothing is
   committed; the schema caps the description at 100 characters, so the script carries its own) and
-  publishes with `mcp-publisher login github-oidc`. If only that job fails, `gh run rerun <id>
-  --failed` repeats it alone. The Lua tests and the smoke test need Resolve and stay local.
-- Releasing: bump `package.json` (`npm version --no-git-tag-version`), `manifest.json` and
-  `SERVER_VERSION`; when the Lua changed, also the bridge header (line 1 and `VERSION`),
-  `claude_diag.lua` (line 1 and `SCRIPT`), `BRIDGE_TAG` in `tests/helpers/fakeBridge.ts` and the
-  envelope in `tests/prefs.test.ts`. Then `make lint-lua`, `make test`, `make bundle`, CI green
-  (both jobs; there is no Windows smoke, the tag message says so), `make install` (the user's click),
-  the user relaunches the script, `make smoke` on a scratch project. Then an annotated tag
-  (`git tag -a vX.Y.Z`: its message becomes the intro of the release notes; a lightweight tag gets a
-  one-line default) and `git push origin vX.Y.Z` (never `--tags`):
-  the workflow gates, packs and publishes the release with the sha256 in the notes. The locally
-  installed bundle is a different pack of the same files (`mcpb pack` never gives the same bytes
-  twice), so `dist/` is never committed and a published tag is never re-run; fix forward with a new
-  tag. A registry entry for a release the workflow did not publish (v0.1.0) is made by hand with
+  publishes with `mcp-publisher login github-oidc`; `mcp-publisher` is pinned to a release version
+  and the sha256 of its linux_amd64 tarball in the job's `env` (refresh both from the
+  `registry_<version>_checksums.txt` asset of the new release). If only that job fails, `gh run
+  rerun <id> --failed` repeats it alone. The Lua tests and the smoke test need Resolve and stay
+  local.
+- GitHub settings (all set with `gh api`, all reversible; CONTRIBUTING.md states the flow): a
+  `main` ruleset (a PR with zero approvals required, squash the only merge method, the three
+  checks required, no force push or deletion, **no bypass actors**: the escape hatch is disabling
+  the ruleset in Settings), a `release tags` ruleset on `refs/tags/v*` (creation, update and
+  deletion only for the repository admin role, verified with GraphQL `repositoryRoleName` because
+  REST returns only the numeric id), squash-only merge settings with `PR_TITLE` and `PR_BODY` as
+  the commit message, head branches auto-deleted, auto-merge allowed (`gh pr merge --squash
+  --auto`); `sha_pinning_required`, Dependabot alerts, secret-scanning non-provider patterns and
+  immutable releases on. A contributor's first PR from a fork waits for the maintainer's approval
+  before its checks run.
+- Releasing: on a `chore/release-X.Y.Z` branch, `node scripts/set-version.mjs X.Y.Z` writes
+  `package.json`, `manifest.json` and `SERVER_VERSION` (textual edits of the version line;
+  `manifest.json` is hand-formatted); when the Lua changed, also the bridge header (line 1 and
+  `VERSION`), `claude_diag.lua` (line 1 and `SCRIPT`), `BRIDGE_TAG` in
+  `tests/helpers/fakeBridge.ts` and the envelope in `tests/prefs.test.ts`. Then `make lint-lua`,
+  `make test`, `make bundle`, the release PR with CI green (both jobs; there is no Windows smoke,
+  the tag message says so). Staging on the real install: remove the installed extension under
+  Settings > Extensions (a reinstall at an equal version shows no dialog), `make install` (the
+  user's click), the user relaunches the script, `make smoke` on a scratch project (the smoke
+  spawns the checkout's server; the install exercises the real install path), one
+  `resolve_status` in a chat. Squash-merge, then tag the PR's merge commit, never `main` HEAD (a
+  Dependabot merge may have landed since): `sha=$(gh pr view <n> --json mergeCommit --jq
+  .mergeCommit.oid)`, an annotated tag on it (`git tag -a vX.Y.Z "$sha"`: its message becomes the
+  intro of the release notes; a lightweight tag gets a one-line default) and `git push origin
+  vX.Y.Z` (never `--tags`): the workflow gates, packs, attests and publishes the release with the
+  sha256 in the notes. Verify the served asset, never `dist/`: `gh release download vX.Y.Z
+  --pattern '*.mcpb' --dir <tmp>`, `gh attestation verify <tmp>/davinci-resolve-lua-mcp.mcpb -R
+  saadk408/davinci-resolve-lua-mcp`, and `gh api repos/saadk408/davinci-resolve-lua-mcp/releases/tags/vX.Y.Z
+  --jq .immutable` is true. The locally installed bundle is a different pack of the same files
+  (`mcpb pack` never gives the same bytes twice), so `dist/` is never committed and a published tag
+  is never re-run; fix forward with a new tag. Rolling back is installing the previous release's
+  asset. A registry entry for a release the workflow did not publish (v0.1.0) is made by hand with
   the same script: `node scripts/registry-entry.mjs vX.Y.Z <sha256 from gh release view --json
   assets> $(gh api repos/saadk408/davinci-resolve-lua-mcp --jq .id) > .out/server.json`, then
   `mcp-publisher login github` (Homebrew `mcp-publisher`, a browser device-code flow) and
@@ -225,10 +269,12 @@ Targets (`Makefile`; the README has the table): `test` = `test-lua` + `test-node
   `tools.test.ts` builds its `TargetDir` expectation from `luaString(root)` because backslashes are
   doubled; `npm test` cannot run under cmd.exe (no glob expansion), run `node --test` from Git Bash.
 - `tests/check_server.sh` greps `src/` (no `console.log`, `process.stdout`, `child_process`, network
-  modules, `.listen(`, raw template holes in Lua strings, plus the vendor-name gate it explains);
-  `tests/check_bundle.mjs` checks the packed file list, size under 2 MB and a stdio `tools/list` +
-  `resolve_status` probe of the unpacked server under temp dirs with the self-install off (both
-  platforms; it spawns the pinned `mcpb unpack`).
+  modules, `.listen(`, raw template holes in Lua strings) and every tracked file except the two
+  gates for the vendor name it explains (`git ls-files`; outside a checkout, the shipped sources);
+  `tests/check_bundle.mjs` checks the packed file list, size under 2 MB, that the same name is
+  absent from the unpacked `server/index.js`, `manifest.json` and `package.json`, and a stdio
+  `tools/list` + `resolve_status` probe of the unpacked server under temp dirs with the
+  self-install off (both platforms; it spawns the pinned `mcpb unpack`).
 - `make lint-lua`: `gen-types.mjs --check` (stale means `make gen-types`), then `lua-language-server
   --check` at Warning level as JSON in `.out/luals-check.json`; the server exits 1 whenever any
   diagnostic exists, so the target greps the report for `bridge/` and `tests/` (rc 127: binary

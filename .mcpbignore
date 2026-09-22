@@ -15,6 +15,7 @@ dist
 types
 Makefile
 CLAUDE.md
+CONTRIBUTING.md
 SECURITY.md
 PRIVACY.md
 .github
@@ -25,6 +26,7 @@ scripts/dev-register.mjs
 scripts/smoke.mjs
 scripts/release-notes.sh
 scripts/registry-entry.mjs
+scripts/set-version.mjs
 cert.pem
 key.pem
 *.bak*

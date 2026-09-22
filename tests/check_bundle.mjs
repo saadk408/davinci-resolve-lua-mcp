@@ -111,6 +111,13 @@ try {
   for (const f of REQUIRED) if (!files.includes(f)) bad(`missing ${f}`);
   for (const f of files) if (!REQUIRED.includes(f) && !OPTIONAL.includes(f)) bad(`unexpected file in the bundle: ${f} (add it to .mcpbignore)`);
 
+  // 2b. A private instrumented build lives in another repository (tests/check_server.sh gates the
+  // sources the same way): its vendor name must not be inside anything that ships.
+  for (const f of ['server/index.js', 'manifest.json', 'package.json']) {
+    const p = path.join(unpacked, f);
+    if (fs.existsSync(p) && /sentry/i.test(fs.readFileSync(p, 'utf8'))) bad(`the word sentry appears in the bundle's ${f} (the private build's code must not enter the public bundle)`);
+  }
+
   // 3. Probe: initialize, initialized, tools/list, resolve_status over stdio. Empty temp dirs stand in
   // for the state, prefs and docs folders, so the answer is deterministic (prefs_missing) on every
   // platform and the real user folders are never read. `...process.env` matters on Windows

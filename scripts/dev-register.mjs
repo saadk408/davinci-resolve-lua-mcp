@@ -9,6 +9,8 @@
 //   node scripts/dev-register.mjs --remove     delete the entry
 //   --config <path>   the config file (default ~/Library/Application Support/Claude/claude_desktop_config.json)
 //   --name <key>      the mcpServers key (default davinci-resolve-lua-mcp-dev)
+//   --server <path>   the server entry the entry runs (default <repo>/server/index.js); another
+//                     checkout's or worktree's build, registered under the same key
 //   --env <path>      KEY=VALUE file whose RLB_* lines become the entry's env (default <repo>/.env)
 //   --dry-run         print the resulting config and write nothing
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
@@ -29,7 +31,7 @@ const name = opt('--name', 'davinci-resolve-lua-mcp-dev');
 const envPath = resolve(opt('--env', join(root, '.env')));
 const remove = args.includes('--remove');
 const dryRun = args.includes('--dry-run');
-const serverJs = join(root, 'server', 'index.js');
+const serverJs = resolve(opt('--server', join(root, 'server', 'index.js')));
 
 function die(message) {
   console.error(`dev-register: ${message}`);

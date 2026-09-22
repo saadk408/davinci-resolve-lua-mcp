@@ -91,3 +91,18 @@ test('dev-register creates a missing config, honours --name and --dry-run, and r
     await dirs.cleanup();
   }
 });
+
+test('dev-register --server registers another build under the same entry name', async () => {
+  const dirs = await makeTempDirs();
+  const cfg = path.join(dirs.root, 'cfg.json');
+  const other = path.join(dirs.root, 'elsewhere', 'server', 'index.js');
+  try {
+    const dry = run('--config', cfg, '--server', other, '--dry-run');
+    assert.equal(dry.status, 0, dry.stderr);
+    const preview = JSON.parse(dry.stdout) as Record<string, any>;
+    assert.deepEqual(preview['mcpServers']['davinci-resolve-lua-mcp-dev'].args, [other]);
+    assert.match(dry.stderr, /does not exist yet/, 'a missing build is a note, not an error');
+  } finally {
+    await dirs.cleanup();
+  }
+});
