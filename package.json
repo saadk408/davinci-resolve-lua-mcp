@@ -32,6 +32,6 @@
     "@types/node": "^20.19.0",
     "esbuild": "^0.28.2",
     "tsx": "^4.23.0",
-    "typescript": "^5.9.3"
+    "typescript": "^7.0.2"
   }
 }
