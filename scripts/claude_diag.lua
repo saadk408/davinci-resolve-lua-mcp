@@ -10,7 +10,7 @@
 -- bins and one timeline (which it deletes) in the project that is open. Run it ONLY in a scratch
 -- project. It reads <state dir>/next.lua, a request file the terminal side pre-creates.
 
-local STATE_DIR_STAMP = "@@RLB_STATE_DIR@@"   -- substituted at copy time; unreplaced or "" means: build from HOME
+local STATE_DIR_STAMP = [==[@@RLB_STATE_DIR@@]==]   -- substituted at copy time (long bracket: a quote or backslash is safe); unreplaced or "" means: build from HOME/USERPROFILE
 local CLEANUP = false                          -- true: delete the claude_diag bin at the end (DeleteFolders)
 local PREFIX = "Global.ResolveLuaBridge."
 local SCRIPT = "claude_diag v0.1.0"
@@ -459,6 +459,10 @@ local function step_env()
   end
   rec(E, "HOME", function() return os.getenv("HOME") end)
   rec(E, "USER", function() return os.getenv("USER") end)
+  -- Windows: HOME is unset there; these three are what the bridge and the server derive paths from.
+  rec(E, "USERPROFILE", function() return os.getenv("USERPROFILE") end)
+  rec(E, "APPDATA", function() return os.getenv("APPDATA") end)
+  rec(E, "PROGRAMDATA", function() return os.getenv("PROGRAMDATA") end)
   rec(E, "PATH_len", function() local p = os.getenv("PATH"); return p and #p or "<nil>" end)
   rec(E, "loop_seconds_env", function() return os.getenv("RLB_DIAG_LOOP_SECONDS") end)
 end
@@ -489,7 +493,7 @@ local function step_fusion_api()
   rec(F, "scripts_root", function() return fusion_obj:MapPath("Scripts:") end)
   if type(F.profile) == "string" then
     local p = F.profile
-    if p:sub(-1) ~= "/" then p = p .. "/" end
+    if not p:match("[/\\]$") then p = p .. "/" end   -- a Windows MapPath may end in a backslash
     local prefsPath = p .. "Fusion.prefs"
     F.prefs_path = prefsPath
     rec(F, "prefs_exists", function() return bmd.fileexists(prefsPath) end)
@@ -507,12 +511,14 @@ local function step_state_dir()
   local cands = {}
   local home = (R.env and type(R.env.HOME) == "string") and R.env.HOME or nil
   if home and #home > 0 then cands[#cands + 1] = { "HOME", home .. "/.davinci-resolve-lua-mcp" } end
+  local prof = (R.env and type(R.env.USERPROFILE) == "string") and R.env.USERPROFILE or nil   -- Windows: HOME is unset
+  if prof and #prof > 0 then cands[#cands + 1] = { "USERPROFILE", (prof:gsub("[/\\]+$", "")) .. "/.davinci-resolve-lua-mcp" } end
   if type(STATE_DIR_STAMP) == "string" and #STATE_DIR_STAMP > 0 and STATE_DIR_STAMP:sub(1, 2) ~= "@@" then
     cands[#cands + 1] = { "stamp", STATE_DIR_STAMP }
   end
   local profile = R.fusion and R.fusion.profile
   if type(profile) == "string" then
-    local pre = profile:match("^(.-)/Library/")
+    local pre = profile:match("^(.-)/Library/") or profile:match("^(.-)[/\\]AppData[/\\]")   -- macOS, then Windows
     if pre and #pre > 0 then cands[#cands + 1] = { "profile", pre .. "/.davinci-resolve-lua-mcp" } end
   end
   S.candidates = {}
@@ -569,10 +575,16 @@ local function step_request()
   local su = R.fusion and R.fusion.scripts_utility
   if type(su) == "string" then
     local p = su
-    if p:sub(-1) ~= "/" then p = p .. "/" end
+    if not p:match("[/\\]$") then p = p .. "/" end   -- a Windows MapPath may end in a backslash
     rec(Q, "control_loadfile_self", function()
       local f, e = loadfile(p .. "claude_diag.lua")
       return { path = p .. "claude_diag.lua", fn = type(f), err = e and tos(e) or "<nil>" }
+    end)
+    -- Windows: the server stamps the state dir with forward slashes; this proves loadfile accepts them.
+    rec(Q, "control_loadfile_self_slashes", function()
+      local sp = (p .. "claude_diag.lua"):gsub("\\", "/")
+      local f, e = loadfile(sp)
+      return { path = sp, fn = type(f), err = e and tos(e) or "<nil>" }
     end)
   end
   if type(req) == "table" then

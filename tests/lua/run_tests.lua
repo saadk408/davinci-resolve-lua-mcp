@@ -536,6 +536,23 @@ eq("stamp placeholder", M.STATE_DIR_STAMP, "@@RLB_STATE_DIR@@")
 local bridge_src = read_file(BRIDGE) or ""
 check("stamp is a long-bracket literal", bridge_src:find("[==[@@RLB_STATE_DIR@@]==]", 1, true) ~= nil)
 check("stamp is not a quoted literal", bridge_src:find('"@@RLB_STATE_DIR@@"', 1, true) == nil)
+-- Windows: HOME is unset there, so USERPROFILE follows it; separators may be backslashes.
+dir, src = M.resolve_state_dir("@@RLB_STATE_DIR@@", genv({ USERPROFILE = "C:\\Users\\x\\" }), mp)
+eq("USERPROFILE", dir, "C:\\Users\\x/.davinci-resolve-lua-mcp"); eq("USERPROFILE source", src, "USERPROFILE")
+dir, src = M.resolve_state_dir("@@RLB_STATE_DIR@@", genv({ HOME = "/h", USERPROFILE = "C:\\Users\\x" }), mp)
+eq("HOME wins over USERPROFILE", dir, "/h/.davinci-resolve-lua-mcp"); eq("HOME wins source", src, "HOME")
+dir, src = M.resolve_state_dir("C:/stamped\\", genv({}), nil)
+eq("stamp strips a trailing backslash", dir, "C:/stamped")
+dir, src = M.resolve_state_dir("@@RLB_STATE_DIR@@", genv({ RLB_STATE_DIR = "D:\\rlb\\\\" }), nil)
+eq("env strips trailing backslashes", dir, "D:\\rlb")
+local function mpw() return "C:\\Users\\x\\AppData\\Roaming\\Blackmagic Design\\DaVinci Resolve\\Support\\Fusion\\Profiles\\Default\\" end
+dir, src = M.resolve_state_dir("@@RLB_STATE_DIR@@", genv({}), mpw)
+eq("Windows profile (backslashes)", dir, "C:\\Users\\x/.davinci-resolve-lua-mcp"); eq("Windows profile source", src, "profile")
+local function mpws() return "C:/Users/x/AppData/Roaming/Blackmagic Design/DaVinci Resolve/Support/Fusion/Profiles/Default/" end
+dir, src = M.resolve_state_dir("@@RLB_STATE_DIR@@", genv({}), mpws)
+eq("Windows profile (slashes)", dir, "C:/Users/x/.davinci-resolve-lua-mcp")
+dir, src = M.resolve_state_dir("@@RLB_STATE_DIR@@", genv({}), nil)
+check("none names USERPROFILE", dir == nil and src:match("USERPROFILE") ~= nil, src)
 
 ---------------------------------------------------------------------------
 -- 15. acquisition
@@ -634,6 +651,9 @@ FU.profile = saved_profile
 local st6 = M.start({ resolve = resolve_stub, fusion = fusion_stub, getenv = genv({ HOME = DIR .. "/home" }) })
 check("HOME state dir", st6 and st6.state_dir == DIR .. "/home/.davinci-resolve-lua-mcp" and st6.state_dir_source == "HOME", st6 and st6.state_dir)
 eq("missing state dir is not an error", M.run_loop(st6, 3, 0), "ticks")
+local st6w = M.start({ resolve = resolve_stub, fusion = fusion_stub, getenv = genv({ USERPROFILE = DIR .. "/home" }) })
+check("USERPROFILE state dir", st6w and st6w.state_dir == DIR .. "/home/.davinci-resolve-lua-mcp" and st6w.state_dir_source == "USERPROFILE", st6w and st6w.state_dir)
+eq("missing state dir is not an error (USERPROFILE)", M.run_loop(st6w, 3, 0), "ticks")
 remove_file(RQ)
 FU.fail_saves, FU.saves = 5, 0
 local st7 = M.start({ resolve = resolve_stub, fusion = fusion_stub, state_dir = STATE })

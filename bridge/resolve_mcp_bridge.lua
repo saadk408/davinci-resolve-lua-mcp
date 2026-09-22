@@ -286,20 +286,24 @@ local function acquire_fusion(resolve)
   return nil, "no fusion object with SetPrefs"
 end
 
--- Lua never expands "~": stamp > RLB_STATE_DIR env > HOME > the prefix of MapPath("Profile:").
+-- Lua never expands "~": stamp > RLB_STATE_DIR env > HOME > USERPROFILE (Windows; HOME is unset there)
+-- > the home prefix of MapPath("Profile:") ("<home>/Library/" on macOS, "<home>[/\]AppData[/\]" on Windows).
 local function resolve_state_dir(stamp, getenv, mappath)
-  local function strip(p) return (p:gsub("/+$", "")) end
+  local function strip(p) return (p:gsub("[/\\]+$", "")) end
   if type(stamp) == "string" and #stamp > 0 and stamp:sub(1, 2) ~= "@@" then return strip(stamp), "stamp" end
   local env = getenv and getenv("RLB_STATE_DIR")
   if type(env) == "string" and #env > 0 then return strip(env), "env" end
   local home = getenv and getenv("HOME")
   if type(home) == "string" and #home > 0 then return strip(home) .. "/.davinci-resolve-lua-mcp", "HOME" end
+  local prof = getenv and getenv("USERPROFILE")
+  if type(prof) == "string" and #prof > 0 then return strip(prof) .. "/.davinci-resolve-lua-mcp", "USERPROFILE" end
   if mappath then
     local ok, profile = pcall(mappath, "Profile:")
-    local pre = ok and type(profile) == "string" and profile:match("^(.-)/Library/") or nil
+    local p = ok and type(profile) == "string" and profile or ""
+    local pre = p:match("^(.-)/Library/") or p:match("^(.-)[/\\]AppData[/\\]")
     if pre and #pre > 0 then return pre .. "/.davinci-resolve-lua-mcp", "profile" end
   end
-  return nil, "no state directory: RLB_STATE_DIR not stamped, RLB_STATE_DIR and HOME unset"
+  return nil, "no state directory: RLB_STATE_DIR not stamped; RLB_STATE_DIR, HOME and USERPROFILE unset"
 end
 
 -- Requests --------------------------------------------------------------------------------------

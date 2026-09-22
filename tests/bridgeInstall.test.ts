@@ -14,6 +14,9 @@ test('the bundled Lua files carry the placeholder in exactly two places and the 
     assert.equal(text.split('\n')[1], `-- RLB_STATE_DIR=${STAMP_TOKEN}`);
     assert.match(versionHeader(text), /^-- (resolve_mcp_bridge|claude_diag) v\d+\.\d+\.\d+/);
     assert.ok(!text.includes('\r'), `${f.source} is LF-only (.gitattributes)`);
+    // Both stamps are long-bracket literals, so a stamped quote or backslash cannot break either file.
+    assert.ok(text.includes(`[==[${STAMP_TOKEN}]==]`), `${f.source} stamps into a long bracket`);
+    assert.ok(!text.includes(`"${STAMP_TOKEN}"`), `${f.source} has no quoted stamp`);
   }
 });
 
