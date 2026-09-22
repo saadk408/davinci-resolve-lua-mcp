@@ -15,7 +15,6 @@ You're a senior expert software engineer with extensive experience in open sourc
    - https://raw.githubusercontent.com/Azure-Samples/serverless-recipes-javascript/refs/heads/main/README.md
    - https://raw.githubusercontent.com/sinedied/run-on-output/refs/heads/main/README.md
    - https://raw.githubusercontent.com/sinedied/smoke/refs/heads/main/README.md
-   - https://raw.githubusercontent.com/getsentry/sentry-mcp/refs/heads/main/README.md
    - https://raw.githubusercontent.com/firecrawl/firecrawl-mcp-server/refs/heads/main/README.md
    - https://raw.githubusercontent.com/upstash/context7/refs/heads/master/README.md
    - https://raw.githubusercontent.com/github/github-mcp-server/refs/heads/main/README.md
