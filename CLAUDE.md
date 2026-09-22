@@ -5,14 +5,16 @@ Guidance for Claude Code in this repository.
 ## What this is
 
 `davinci-resolve-lua-mcp` is an MCP server, shipped as an MCPB bundle for Claude Desktop, that
-controls the free edition of DaVinci Resolve 21.1 on macOS. Free 21.1 has no Python and no external
-scripting, and Blackmagic's own MCP server is Studio-only. The one door left is a Lua script launched
-from `Workspace > Scripts` inside Resolve: it receives the live `resolve` object and runs as a
-long-lived in-app bridge that executes Lua for the server. Requests are a file the bridge reads with
-`loadfile`; responses go back through `fusion:SetPrefs` + `fusion:SavePrefs()`, which the server
-reads from `Fusion.prefs` on disk. The server is TypeScript on the v2 SDK
-(`@modelcontextprotocol/server`), bundled by esbuild into one CJS file that Claude Desktop runs with
-its own Node. Version 0.1.0 is the first public release.
+controls the free edition of DaVinci Resolve 21.1 on macOS and, since 0.2.0 and experimentally, on
+Windows. Free 21.1 has no Python and no external scripting, and Blackmagic's own MCP server is
+Studio-only. The one door left is a Lua script launched from `Workspace > Scripts` inside Resolve:
+it receives the live `resolve` object and runs as a long-lived in-app bridge that executes Lua for
+the server. Requests are a file the bridge reads with `loadfile`; responses go back through
+`fusion:SetPrefs` + `fusion:SavePrefs()`, which the server reads from `Fusion.prefs` on disk. The
+server is TypeScript on the v2 SDK (`@modelcontextprotocol/server`), bundled by esbuild into one CJS
+file that Claude Desktop runs with its own Node. Version 0.1.0 was the first public release; 0.2.0
+added the Windows port blind (no Windows machine): every Windows fact in this file is
+documented-not-measured until the checklist in `docs/windows.md` has been run by a contributor.
 
 `README.md` is the user documentation (install, start and stop, the 15-tool table with the `run_lua`
 guide, the settings and `RLB_*` variables, troubleshooting, security, uninstall, the make targets);
@@ -30,9 +32,9 @@ Not negotiable without the user's say-so.
   first. Implementation-level improvements can be adopted directly, with a note in a comment or here.
 - stdout is the MCP transport: `console.error` and the file log only, never `console.log` in `src/`.
 - No network listeners of any kind. Files in, prefs out.
-- Never modify anything under `/Applications` or `/Library` without asking; Blackmagic's docs folder
-  is read-only. The server writes only its state dir and the user Utility folder (its two Lua files)
-  and never creates Resolve's folders.
+- Never modify anything under `/Applications` or `/Library` (Windows: `C:\Program Files`,
+  `%PROGRAMDATA%`) without asking; Blackmagic's docs folder is read-only. The server writes only its
+  state dir and the user Utility folder (its two Lua files) and never creates Resolve's folders.
 - Destructive tools take `confirm: bool = false` and refuse when false. Development never runs
   destructive Resolve operations except on objects the tests created; smoke runs and mutating Lua go
   only to a scratch project the user names, never to a real edit.
@@ -79,7 +81,8 @@ Not negotiable without the user's say-so.
 ```
 Claude Desktop --stdio--> MCPB "DaVinci Resolve Lua MCP" = node ${__dirname}/server/index.js
       | writes <state_dir>/next.lua (tmp + rename): return {v, id, session, op, ts, code=[==[...]==]}
-      | polls  ~/Library/.../Fusion/Profiles/*/Fusion.prefs for RLBResp = "<id>:<hex json>"
+      | polls  <prefs_dir>/*/Fusion.prefs for RLBResp = "<id>:<hex json>"
+      |        (macOS ~/Library/.../Fusion/Profiles; Windows %APPDATA%\...\Support\Fusion\Profiles, unmeasured)
       | deletes next.lua after the response (Lua cannot delete files)
       | first run: copies bridge/resolve_mcp_bridge.lua + scripts/claude_diag.lua into the user Utility folder
       v
@@ -96,24 +99,34 @@ bridge/resolve_mcp_bridge.lua (Scripts-menu Lua state, holds live `resolve`)
 - Caps: 64 KB of JSON by default, 192 KB hard ceiling (before hex); prints 200 lines, 16 KB, 2048
   bytes per line (constants in the bridge's `PRINT_MAX_*`/`MAX_KB_*` block and `src/config.ts`). Only
   the chunk's first return value is sent (`extra_returns`); dropped prints count in `prints_dropped`.
-- The bridge resolves its state dir as stamp > `RLB_STATE_DIR` env > `HOME` > `MapPath("Profile:")`;
-  a `state_dir_match` of false in `resolve_status` means a hand-copied or stale script. After three
-  consecutive failed runs where `GetVersionString` also fails, the loop exits (status `no_reply`,
-  `pid_alive` true).
-- Runtime state: `RLB_STATE_DIR` (default `~/.davinci-resolve-lua-mcp`, 0700) holds `next.lua`,
-  `next.lua.tmp`, `lock` (a pid file hard-linked into place, taken per request, absent while idle),
-  `lock.takeover` (exists only during the takeover of a dead holder's lock; one older than 30 s is
-  abandoned and removed) and `server.log`. No queue directories, no heartbeat file, no stop file.
+- The bridge resolves its state dir as stamp > `RLB_STATE_DIR` env > `HOME` > `USERPROFILE` (Windows,
+  where `HOME` is nil) > the home prefix of `MapPath("Profile:")` (`/Library/` on macOS, `AppData` on
+  Windows); a `state_dir_match` of false in `resolve_status` means a hand-copied or stale script. On
+  win32 the server spells the state dir with forward slashes (`C:/Users/x/.davinci-resolve-lua-mcp`)
+  everywhere (config, stamp, log, status) so the stamp rule that refuses `\` holds; `sameStateDir()`
+  in `protocol.ts` compares the bridge's report with ours (either separator, case-insensitive on
+  win32; trailing `/` only on macOS). After three consecutive failed runs where `GetVersionString`
+  also fails, the loop exits (status `no_reply`, `pid_alive` true).
+- Runtime state: `RLB_STATE_DIR` (default `~/.davinci-resolve-lua-mcp`, 0700 on macOS; Windows ignores
+  the mode and inherits the profile ACLs) holds `next.lua`, `next.lua.tmp`, `lock` (a pid file
+  hard-linked into place, taken per request, absent while idle), `lock.takeover` (exists only during
+  the takeover of a dead holder's lock; one older than 30 s is abandoned and removed) and
+  `server.log`. No queue directories, no heartbeat file, no stop file.
+  `retryTransient()` in `protocol.ts` retries `EBUSY`/`EPERM`/`EACCES` for about a second on the
+  request file's rename and delete only: Windows refuses both while the bridge's `loadfile` holds
+  `next.lua` open (it re-reads the file every 50 ms), and never on the lock (Node-to-Node, opened with
+  share-delete). `main.ts` also handles `SIGBREAK` (Windows Ctrl+Break); Claude Desktop stops the
+  server by closing stdin on both platforms (Windows cannot deliver SIGTERM).
 - Layout: `src/` (ten modules; `main.ts` is the wiring, `server.ts` the tools, `lua.ts` the snippets,
   `protocol.ts` the slot and lock, `prefs.ts` the reader, `bridgeInstall.ts` the self-install),
   `server/index.js` (built, git-ignored, shipped), `bridge/resolve_mcp_bridge.lua`, `scripts/`
   (`claude_diag.lua` ships; `gen-types.mjs`, `dev-register.mjs`, `smoke.mjs`, `release-notes.sh`,
   `registry-entry.mjs` are developer-only), `types/resolve_host.d.lua` + `.luarc.json` (Lua LSP),
-  `tests/`, `docs/images/`
-  (README screenshots; the MP4 recordings are git-ignored, GitHub-hosted), `.github/workflows/`
-  (`tests.yml`, `release.yml`), `SECURITY.md`, `PRIVACY.md`.
+  `tests/`, `docs/` (`windows.md`, the Windows assumptions and measurement checklist; `images/`, README
+  screenshots; the MP4 recordings are git-ignored, GitHub-hosted), `.github/workflows/`
+  (`tests.yml`, `release.yml`), `SECURITY.md`, `PRIVACY.md`, `.gitattributes` (every text file LF).
   `tsconfig.json` covers `src/` and `tests/` only. The bundle is exactly the eight files allowlisted
-  in `tests/check_bundle.sh`; anything new goes into `.mcpbignore` (directories without trailing
+  in `tests/check_bundle.mjs`; anything new goes into `.mcpbignore` (directories without trailing
   slashes: `mcpb pack` walks with the `ignore` package after built-in excludes that do not cover
   `node_modules`, `.claude`, `.remember` or `.out`).
 
@@ -142,15 +155,23 @@ Targets (`Makefile`; the README has the table): `test` = `test-lua` + `test-node
   until the installed script equals the repo's: the server compares the stamped files byte for byte,
   so any edit to the bridge or `claude_diag.lua` reports `updated` on the next start and the user
   must relaunch `Workspace > Scripts > resolve_mcp_bridge`.
-- `make bundle`: two packs give the same file list but different bytes (zip mtime); compare with
-  `zipinfo -1`. `mcpb` is the pinned local binary, never `npx` (unreliable on npm 11). `make sign` is
-  optional and self-signed.
+- `make bundle` = `npm run bundle` (npm puts the pinned `mcpb` on PATH; never `npx`, unreliable on
+  npm 11): `mcpb validate`, `pack`, `info`, then `tests/check_bundle.mjs`, which unpacks with
+  `mcpb unpack`, checks the exact file list and the size, and probes the unpacked server over stdio
+  (`tools/list` = 15 tools, `resolve_status.platform` = `process.platform`, no lock left) under temp
+  dirs with the self-install off. Two packs give the same file list but different bytes (zip mtime);
+  compare with `zipinfo -1`. `make sign` is optional and self-signed.
 - `make dev-register` merges a `davinci-resolve-lua-mcp-dev` entry into the real config after backing
   it up (flags in the script). A code change then needs `make build` and a Claude Desktop restart.
 - CI (`.github/workflows/tests.yml`) runs `make test-node` and `make bundle` on macOS with Node 20
-  and 24 for branch pushes and pull requests; it ignores tag pushes. `release.yml` runs on a `v*`
-  tag push: a guard that the tag equals `v` + the `package.json` and `manifest.json` versions, a
-  guard that no release exists for the tag, `make test-node`, `make bundle`,
+  and 24, plus a `windows-latest` job with Node 20 and no make (`npm ci`, `bash tests/check_server.sh
+  src`, `bash tests/lua/check_bridge.sh`, `npm run typecheck`, `npm run build`, `node --import tsx
+  --test tests/*.test.ts` under Git Bash so the glob expands, `npm run bundle`); `.gitattributes`
+  forces LF because the runner's Git has `core.autocrlf=true`. Both run for branch pushes and pull
+  requests and ignore tag pushes. `release.yml` stays macOS: the bundle is platform-neutral JS + Lua,
+  one file serves both platforms, and the registry entry has no platform field. `release.yml` runs
+  on a `v*` tag push: a guard that the tag equals `v` + the `package.json` and `manifest.json`
+  versions, a guard that no release exists for the tag, `make test-node`, `make bundle`,
   `scripts/release-notes.sh`, then `gh release create` with the bundle attached (the README's
   `releases/latest/download/...` link follows it). A second job then publishes the release to the
   MCP Registry as `io.github.saadk408/davinci-resolve-lua-mcp`: it downloads the asset the release
@@ -161,10 +182,11 @@ Targets (`Makefile`; the README has the table): `test` = `test-lua` + `test-node
 - Releasing: bump `package.json` (`npm version --no-git-tag-version`), `manifest.json` and
   `SERVER_VERSION`; when the Lua changed, also the bridge header (line 1 and `VERSION`),
   `claude_diag.lua` (line 1 and `SCRIPT`), `BRIDGE_TAG` in `tests/helpers/fakeBridge.ts` and the
-  envelope in `tests/prefs.test.ts`. Then `make lint-lua`, `make test`, `make bundle`, CI green,
-  `make install` (the user's click), the user relaunches the script, `make smoke` on a scratch
-  project. Then an annotated tag (`git tag -a vX.Y.Z`: its message becomes the intro of the release
-  notes; a lightweight tag gets a one-line default) and `git push origin vX.Y.Z` (never `--tags`):
+  envelope in `tests/prefs.test.ts`. Then `make lint-lua`, `make test`, `make bundle`, CI green
+  (both jobs; there is no Windows smoke, the tag message says so), `make install` (the user's click),
+  the user relaunches the script, `make smoke` on a scratch project. Then an annotated tag
+  (`git tag -a vX.Y.Z`: its message becomes the intro of the release notes; a lightweight tag gets a
+  one-line default) and `git push origin vX.Y.Z` (never `--tags`):
   the workflow gates, packs and publishes the release with the sha256 in the notes. The locally
   installed bundle is a different pack of the same files (`mcpb pack` never gives the same bytes
   twice), so `dist/` is never committed and a published tag is never re-run; fix forward with a new
@@ -185,22 +207,28 @@ Targets (`Makefile`; the README has the table): `test` = `test-lua` + `test-node
   which makes it return its internals instead of starting the loop; `start({resolve, fusion,
   state_dir, getenv})` injects the rest. `dkjson` and `io` come from `rawget(_G, "require")` and
   `rawget(_G, "io")` because `.luarc.json` disables `package` and `io`. Absolute paths everywhere.
-- `tests/lua/check_bridge.sh` gates: under 600 lines (nine of headroom today), the two header lines,
+- `tests/lua/check_bridge.sh` gates: under 600 lines (four of headroom today), the two header lines,
   the stamp literal, forbidden names on comment-stripped lines, and exactly one `:SetPrefs(`,
   `:SavePrefs(`, `:GetPrefs(` call site each. A new prefs call or a `debug.`/`io.` reference fails by
   design: reach `debug` through `gread`, keep prefs writes inside `set_pref`/`save_prefs`.
-- Node suite (`node --test` through `tsx`): never touches `~/Library` or `/Library`; the `RLB_*`
-  directories point at `tests/helpers/tmp.ts` temp dirs; `tests/helpers/fakeBridge.ts` answers
+- Node suite (`node --test` through `tsx`): never touches `~/Library`, `/Library` or `%APPDATA%`; the
+  `RLB_*` directories point at `tests/helpers/tmp.ts` temp dirs; `tests/helpers/fakeBridge.ts` answers
   `next.lua` by rewriting a Fusion-format prefs file and models the bridge's failure modes; tool
   tests use a recording `Bridge` stub (`createServer` takes the interface) and assert on the captured
   Lua; the `fuscript`-backed tests skip themselves when Resolve is absent. Test files cannot use
   top-level `await` (CJS); use `existsSync` for skips. Files run concurrently, so after touching the
   locking in `protocol.ts` loop the suite:
   `for i in 1 2 3 4 5 6 7 8; do node --import tsx --test tests/*.test.ts | grep -q '^✖' && echo FAIL; done`
+- On Windows: `config.test.ts` pins the platform explicitly in every default-path assertion (the
+  win32 cases assert exact `C:\...` strings through the `loadConfig(env, home, platform)` seam), the
+  `devRegister.test.ts` mode assertions are guarded (a macOS tool), the `fuscript` tests skip,
+  `tools.test.ts` builds its `TargetDir` expectation from `luaString(root)` because backslashes are
+  doubled; `npm test` cannot run under cmd.exe (no glob expansion), run `node --test` from Git Bash.
 - `tests/check_server.sh` greps `src/` (no `console.log`, `process.stdout`, `child_process`, network
   modules, `.listen(`, raw template holes in Lua strings, plus the vendor-name gate it explains);
-  `tests/check_bundle.sh` checks the packed file list, size under 2 MB and a stdio `tools/list` probe
-  of the unpacked server under a temp state dir with the self-install off.
+  `tests/check_bundle.mjs` checks the packed file list, size under 2 MB and a stdio `tools/list` +
+  `resolve_status` probe of the unpacked server under temp dirs with the self-install off (both
+  platforms; it spawns the pinned `mcpb unpack`).
 - `make lint-lua`: `gen-types.mjs --check` (stale means `make gen-types`), then `lua-language-server
   --check` at Warning level as JSON in `.out/luals-check.json`; the server exits 1 whenever any
   diagnostic exists, so the target greps the report for `bridge/` and `tests/` (rc 127: binary
@@ -249,6 +277,27 @@ facts; a point release can change them.
   on a dirty project can raise a modal the bridge cannot answer, so `open_project` saves first by
   default and interactive render mode stays off.
 
+### Windows (documented, not measured)
+
+From Blackmagic's shipped README unless marked otherwise; nothing here has been run on Windows.
+
+| Item | Value assumed |
+|---|---|
+| Per-user scripts folder | `%APPDATA%\Blackmagic Design\DaVinci Resolve\Support\Fusion\Scripts\Utility` (note the `Support` segment; the all-users root `%PROGRAMDATA%\Blackmagic Design\DaVinci Resolve\Fusion\Scripts` has none) |
+| `Fusion.prefs` | `%APPDATA%\Blackmagic Design\DaVinci Resolve\Support\Fusion\Profiles\Default\Fusion.prefs` (forum-sourced, consistent with the `Support\Fusion` layout) |
+| Scripting docs | `%PROGRAMDATA%\Blackmagic Design\DaVinci Resolve\Support\Developer\Scripting` |
+| `fuscript` | `C:\Program Files\Blackmagic Design\DaVinci Resolve\fuscript.exe` (unused by the tooling) |
+| State dir | `%USERPROFILE%\.davinci-resolve-lua-mcp`, stamped with forward slashes |
+| Claude Desktop | `%APPDATA%\Claude\...`; the Microsoft Store build redirects it under `%LOCALAPPDATA%\Packages\Claude_<id>\LocalCache\Roaming\Claude\` |
+
+Nothing in the sandbox census, `SavePrefs` (rename or in place), the takeover, `loadfile` with
+forward slashes, the ANSI-vs-UTF-8 `fopen` behind `loadfile` (a non-ASCII `%USERPROFILE%` may break
+it; `resolve_status` reports `state_dir_ascii`), `os.getenv("USERPROFILE")`, the shape of
+`MapPath("Profile:")` or the Utility scan has been measured on Windows. `docs/windows.md` is the
+checklist (run `claude_diag` from the Scripts menu, decode `RLBDiag` with the PowerShell snippet
+there); a contributor's measurement moves a line into the list above with the Resolve build it was
+measured on.
+
 ## Lua conventions
 
 - Before writing any Lua, read the shipped docs: the `.pyi` for every signature, argument order,
@@ -276,11 +325,12 @@ facts; a point release can change them.
   start; `AddSubFolder` makes the new folder current and allows duplicate names (look bins up by name
   first, restore with `SetCurrentFolder`); `CreateEmptyTimeline` makes the new timeline current.
 - `bmd.readstring`/`bmd.writestring` are Lua-table serialisers, not file I/O.
-- Lua never expands `~`: build every path from `os.getenv("HOME")` or the `RLB_STATE_DIR` header the
-  server stamps into the Lua files at copy time. The contract spans the bridge (the
-  `[==[@@RLB_STATE_DIR@@]==]` literal and the line-2 comment), `stateDirStampProblem()` in
-  `src/config.ts` (refuses `]==]`, `"`, `\`, CR/LF and a leading `@@`), `src/bridgeInstall.ts`
-  (replaces every occurrence) and `check_bridge.sh`.
+- Lua never expands `~`: build every path from `os.getenv("HOME")` (macOS) or `os.getenv("USERPROFILE")`
+  (Windows, where `HOME` is nil), or the `RLB_STATE_DIR` header the server stamps into the Lua files
+  at copy time, with forward slashes on both platforms (strip trailing separators with `[/\\]+$`).
+  The contract spans the bridge (the `[==[@@RLB_STATE_DIR@@]==]` literal and the line-2 comment),
+  `stateDirStampProblem()` in `src/config.ts` (refuses `]==]`, `"`, `\`, CR/LF and a leading `@@`),
+  `src/bridgeInstall.ts` (replaces every occurrence) and `check_bridge.sh`.
 
 ## TypeScript conventions
 
@@ -311,8 +361,11 @@ facts; a point release can change them.
   idle "era probe" sibling alive for the whole session, in utility processes with stdin on
   `/dev/null` (the stdin-closed exit path never fires there); a startup lock would be owned by that
   sibling for ever and every request would answer `lock_held`.
-- `expandHome()` in `src/config.ts` expands a leading `~` and `${HOME}`, because Claude Desktop passes
-  a `user_config.default` such as `${HOME}/.davinci-resolve-lua-mcp` to the server literally.
+- `expandHome(value, home, platform)` in `src/config.ts` expands a leading `~` and `${HOME}` (with `\`
+  too on win32), because Claude Desktop passes a `user_config.default` such as
+  `${HOME}/.davinci-resolve-lua-mcp` to the server literally; `home` is `config.home` (`os.homedir()`,
+  which is `%USERPROFILE%` on Windows where `HOME` is unset) and `loadConfig(env, home, platform)` is
+  the seam the tests use to assert Windows paths on a Mac.
 - Scripts that spawn the server use `StdioClientTransport` (`@modelcontextprotocol/client/stdio`),
   which gives the child `getDefaultEnvironment()` (`HOME LOGNAME PATH SHELL TERM USER`) plus the
   `env` option only, so every `RLB_*` variable is passed explicitly. `Client.callTool` returns
@@ -325,7 +378,11 @@ facts; a point release can change them.
 
 - Extensions live in `~/Library/Application Support/Claude/Claude Extensions/<id>/`; this one is
   `type: node`, run with Claude's bundled Node (the host resolves the user's login PATH but maps a
-  bare `node` to its own).
+  bare `node` to its own). On Windows: `%APPDATA%\Claude\Claude Extensions\<id>\`,
+  `%APPDATA%\Claude\claude_desktop_config.json`, `%APPDATA%\Claude\logs\`,
+  `%APPDATA%\Claude\extensions-installations.json`; the Microsoft Store (MSIX) build virtualises all of
+  them under `%LOCALAPPDATA%\Packages\Claude_<id>\LocalCache\Roaming\Claude\`. `dev-register.mjs`
+  knows only the macOS config path; on Windows the config is edited by hand (`docs/windows.md`).
 - `~/Library/Logs/Claude/mcp-server-DaVinci Resolve Lua MCP.log` records the manager's connection
   (`initialize`, `tools/list`, era probes, shutdowns) but not the chat's tool calls; stderr is also
   copied into `main.log` as `[UtilityProcess stderr]`, and `grep -h '\[MCP Launch\]\|\[UV Discovery\]'
