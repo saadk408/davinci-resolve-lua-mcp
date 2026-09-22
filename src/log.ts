@@ -1,4 +1,5 @@
-// Logging: stderr (Claude Desktop keeps it in ~/Library/Logs/Claude/mcp-server-<name>.log) plus an
+// Logging: stderr (Claude Desktop keeps it in ~/Library/Logs/Claude/mcp-server-<name>.log on macOS,
+// %APPDATA%\Claude\logs\ on Windows) plus an
 // append-only file in the state directory, truncated when it passes MAX_LOG_BYTES. stdout is the
 // MCP transport and is never written here.
 import * as fs from 'node:fs';

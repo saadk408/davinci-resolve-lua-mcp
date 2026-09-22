@@ -21,11 +21,13 @@ export async function makeTempDirs(prefix = 'rlb-test-'): Promise<TempDirs> {
     docsDir: path.join(root, 'docs'),
     scriptsDir: path.join(root, 'Utility'),
   };
+  // `mode` is ignored on Windows (fs.mkdir documents it as unsupported there); the dirs inherit the temp folder ACLs.
   await Promise.all(Object.values(dirs).map((d) => fsp.mkdir(d, { recursive: true, mode: 0o700 })));
   return {
     root,
     ...dirs,
-    cleanup: () => fsp.rm(root, { recursive: true, force: true }),
+    // Windows answers EBUSY for a moment when a poller is mid-read at cleanup time; Node retries these.
+    cleanup: () => fsp.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }),
   };
 }
 

@@ -41,7 +41,8 @@ test('dev-register merges the entry, keeps everything else, backs up, keeps 0600
       args: [SERVER_JS],
       env: { RLB_LOG_LEVEL: 'debug', RLB_STATE_DIR: '/tmp/rlb' },
     });
-    assert.equal((await fsp.stat(cfg)).mode & 0o777, 0o600);
+    // The script passes { mode: 0o600 }, which Windows ignores (it reports 0o666).
+    if (process.platform !== 'win32') assert.equal((await fsp.stat(cfg)).mode & 0o777, 0o600);
     const backups = (await fsp.readdir(dirs.root)).filter((f) => f.startsWith('claude_desktop_config.json.bak-'));
     assert.equal(backups.length, 1, 'one backup');
     assert.deepEqual(await readJson(path.join(dirs.root, backups[0] as string)), before, 'the backup is the original');
@@ -76,7 +77,8 @@ test('dev-register creates a missing config, honours --name and --dry-run, and r
     assert.equal(real.status, 0, real.stderr);
     const written = await readJson(cfg);
     assert.deepEqual(written['mcpServers']['rlb-dev'].args, [SERVER_JS]);
-    assert.equal((await fsp.stat(cfg)).mode & 0o777, 0o600);
+    // The script passes { mode: 0o600 }, which Windows ignores (it reports 0o666).
+    if (process.platform !== 'win32') assert.equal((await fsp.stat(cfg)).mode & 0o777, 0o600);
     const backups = (await fsp.readdir(dirs.root)).filter((f) => f.includes('.bak-'));
     assert.equal(backups.length, 0, 'no backup of a file that did not exist');
 

@@ -14,7 +14,7 @@ import { silentLogger } from '../src/log.js';
 import type { Envelope } from '../src/prefs.js';
 import { BridgeClient, BridgeError, START_INSTRUCTION, type Bridge, type BridgeStatus, type RequestOptions } from '../src/protocol.js';
 import { createServer, TOOL_NAMES, type ServerDeps } from '../src/server.js';
-import type { RequestOp } from '../src/lua.js';
+import { luaString, type RequestOp } from '../src/lua.js';
 import { BRIDGE_TAG, startFakeBridge } from './helpers/fakeBridge.js';
 import { makeTempDirs, type TempDirs } from './helpers/tmp.js';
 
@@ -351,7 +351,7 @@ test('render_current_timeline validates the output directory and file name befor
     assert.equal(okRes['job_id'], 'job-1');
     assert.match(stub.lastCode(), /LoadRenderPreset\(preset\)/);
     assert.match(stub.lastCode(), /local preset = "H.264 Master"/);
-    assert.match(stub.lastCode(), new RegExp(`TargetDir = "${r.dirs.root.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}", CustomName = "out \\\\"1\\\\""`));
+    assert.match(stub.lastCode(), new RegExp(`TargetDir = "${luaString(r.dirs.root).slice(1, -1).replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}", CustomName = "out \\\\"1\\\\""`));
     assert.match(stub.lastCode(), /StartRendering\(\{ job_id \}, false\)/);
     assert.ok((stub.calls[0]?.opts.timeoutMs ?? 0) >= 60_000);
   } finally {

@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fsp from 'node:fs/promises';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { Client } from '@modelcontextprotocol/client';
 import { InMemoryTransport } from '@modelcontextprotocol/server';
@@ -21,7 +22,7 @@ const SAMPLE_ARGS: Record<string, Record<string, unknown>> = {
   delete_markers: { confirm: true },
   set_current_timeline: { name: 'TL' },
   open_project: { name: 'Demo' },
-  render_current_timeline: { output_dir: '/tmp', filename: 'x' },
+  render_current_timeline: { output_dir: os.tmpdir(), filename: 'x' },
   get_render_status: { job_id: 'j' },
   scripting_api_docs: { query: 'AddMarker' },
 };
