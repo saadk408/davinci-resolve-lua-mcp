@@ -36,7 +36,11 @@ The [README](https://github.com/saadk408/davinci-resolve-lua-mcp#readme) has the
 
 ## Requirements
 
-macOS, DaVinci Resolve 21.1 free edition (the only build this release was measured against), Claude Desktop.
+macOS, or Windows 10 or 11 (experimental, see below). DaVinci Resolve 21.1 free edition (build 21.1.0.17 on macOS is the only one this release was measured against). Claude Desktop.
+
+## Windows (experimental)
+
+The Windows paths follow Blackmagic's documented layout and were not measured on a Windows machine. If you run this on Windows, please open an issue titled "Windows measurement: Resolve <version>, Windows <version>, Claude Desktop <direct download or Microsoft Store>" with the `resolve_status` answer and the filled-in checklist from [docs/windows.md](https://github.com/saadk408/davinci-resolve-lua-mcp/blob/main/docs/windows.md); the decoded `claude_diag` output is the most useful attachment. A measurement that contradicts an assumed path changes the default in the next release.
 
 ## Signing
 

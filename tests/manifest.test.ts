@@ -19,7 +19,7 @@ interface Manifest {
   name: string;
   version: string;
   display_name: string;
-  server: { type: string; entry_point: string; mcp_config: { command: string; args: string[]; env: Record<string, string> } };
+  server: { type: string; entry_point: string; mcp_config: { command: string; args: string[]; env: Record<string, string>; platform_overrides?: unknown } };
   user_config: Record<string, { type: string; default?: unknown }>;
   compatibility: { platforms: string[]; runtimes: { node: string } };
   tools: Array<{ name: string; description: string }>;
@@ -46,9 +46,17 @@ test('manifest.json tools equal tools/list and the versions agree', async () => 
     RLB_AUTO_INSTALL: '${user_config.auto_install_bridge}',
     RLB_STATE_DIR: '${user_config.state_dir}',
     RLB_DEFAULT_TIMEOUT_S: '${user_config.default_timeout_s}',
+    RLB_PREFS_DIR: '${user_config.prefs_dir}',
   });
-  assert.deepEqual(Object.keys(manifest.user_config).sort(), ['auto_install_bridge', 'default_timeout_s', 'scripts_dir', 'state_dir']);
-  assert.deepEqual(manifest.compatibility.platforms, ['darwin']);
+  assert.deepEqual(Object.keys(manifest.user_config).sort(), ['auto_install_bridge', 'default_timeout_s', 'prefs_dir', 'scripts_dir', 'state_dir']);
+  // MCPB has no per-platform user_config defaults: the two Resolve folders have none (an empty picker
+  // arrives as "", which the server treats as unset and replaces with the platform default); the
+  // state dir default is valid on both platforms. One bundle serves both, so no platform_overrides.
+  assert.equal(manifest.user_config['scripts_dir']?.default, undefined);
+  assert.equal(manifest.user_config['prefs_dir']?.default, undefined);
+  assert.equal(manifest.user_config['state_dir']?.default, '${HOME}/.davinci-resolve-lua-mcp');
+  assert.deepEqual(manifest.compatibility.platforms, ['darwin', 'win32']);
+  assert.equal(manifest.server.mcp_config.platform_overrides, undefined);
   assert.equal(manifest.compatibility.runtimes.node, '>=20.0.0');
   assert.equal(manifest.tools_generated, false);
   assert.ok(Array.isArray(manifest.privacy_policies) && manifest.privacy_policies.length > 0, 'privacy_policies lists at least one URL');

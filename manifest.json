@@ -4,8 +4,8 @@
   "name": "davinci-resolve-lua-mcp",
   "display_name": "DaVinci Resolve Lua MCP",
   "version": "0.1.0",
-  "description": "Control the free edition of DaVinci Resolve 21.1 from Claude through a Lua script that runs inside Resolve. macOS, no Studio licence, no network.",
-  "long_description": "DaVinci Resolve 21.1 removed Python and external scripting from the free edition. This extension talks to Resolve through the one door left: a Lua script launched from Workspace > Scripts inside Resolve, which holds the live `resolve` object and executes Lua on behalf of the server. The server writes request files, the script answers through Fusion preferences; no network is involved. On first run the server copies its two Lua scripts into Resolve's user Utility scripts folder. Then, in Resolve, open a project and run Workspace > Scripts > resolve_mcp_bridge.",
+  "description": "Control the free edition of DaVinci Resolve 21.1 from Claude through a Lua script that runs inside Resolve. macOS and Windows (experimental), no Studio licence, no network.",
+  "long_description": "DaVinci Resolve 21.1 removed Python and external scripting from the free edition. This extension talks to Resolve through the one door left: a Lua script launched from Workspace > Scripts inside Resolve, which holds the live `resolve` object and executes Lua on behalf of the server. The server writes request files, the script answers through Fusion preferences; no network is involved. On first run the server copies its two Lua scripts into Resolve's user Utility scripts folder. Then, in Resolve, open a project and run Workspace > Scripts > resolve_mcp_bridge. Windows support is experimental: the paths follow Blackmagic's documented Windows layout (%APPDATA%\\Blackmagic Design\\DaVinci Resolve\\Support\\Fusion\\...) but have not been measured on a Windows machine; macOS is the reference platform. Every path can be overridden in the settings.",
   "author": {
     "name": "Saad Khan",
     "url": "https://github.com/saadk408"
@@ -19,7 +19,7 @@
   "icons": [
     { "src": "icon.png", "size": "512x512" }
   ],
-  "keywords": ["davinci-resolve", "video-editing", "lua", "blackmagic", "mcp", "mcp-server", "claude-desktop"],
+  "keywords": ["davinci-resolve", "video-editing", "lua", "blackmagic", "mcp", "mcp-server", "claude-desktop", "windows"],
   "server": {
     "type": "node",
     "entry_point": "server/index.js",
@@ -30,7 +30,8 @@
         "RLB_SCRIPTS_DIR": "${user_config.scripts_dir}",
         "RLB_AUTO_INSTALL": "${user_config.auto_install_bridge}",
         "RLB_STATE_DIR": "${user_config.state_dir}",
-        "RLB_DEFAULT_TIMEOUT_S": "${user_config.default_timeout_s}"
+        "RLB_DEFAULT_TIMEOUT_S": "${user_config.default_timeout_s}",
+        "RLB_PREFS_DIR": "${user_config.prefs_dir}"
       }
     }
   },
@@ -38,8 +39,7 @@
     "scripts_dir": {
       "type": "directory",
       "title": "Resolve user scripts folder",
-      "description": "Resolve's user Utility scripts folder. The two Lua scripts are copied here so they appear under Workspace > Scripts. Only this folder is ever written.",
-      "default": "${HOME}/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Utility",
+      "description": "Resolve's user Utility scripts folder, where the two Lua scripts are copied so they appear under Workspace > Scripts; the only Resolve folder ever written. Leave empty for the platform default: ~/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Utility on macOS, %APPDATA%\\Blackmagic Design\\DaVinci Resolve\\Support\\Fusion\\Scripts\\Utility on Windows.",
       "required": false
     },
     "auto_install_bridge": {
@@ -52,7 +52,7 @@
     "state_dir": {
       "type": "directory",
       "title": "State directory",
-      "description": "Where the request file, the lock and the server log live (created with mode 0700).",
+      "description": "Where the request file, the lock and the server log live (mode 0700 on macOS). ${HOME} is your home folder (%USERPROFILE% on Windows). On Windows prefer an ASCII-only path.",
       "default": "${HOME}/.davinci-resolve-lua-mcp",
       "required": false
     },
@@ -64,11 +64,17 @@
       "min": 1,
       "max": 300,
       "required": false
+    },
+    "prefs_dir": {
+      "type": "directory",
+      "title": "Resolve Fusion prefs folder",
+      "description": "The folder holding <profile>/Fusion.prefs, which the bridge answers through. Leave empty for the platform default: ~/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Profiles on macOS, %APPDATA%\\Blackmagic Design\\DaVinci Resolve\\Support\\Fusion\\Profiles on Windows (documented layout, unmeasured).",
+      "required": false
     }
   },
   "compatibility": {
     "claude_desktop": ">=1.0.0",
-    "platforms": ["darwin"],
+    "platforms": ["darwin", "win32"],
     "runtimes": {
       "node": ">=20.0.0"
     }
