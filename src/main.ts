@@ -107,6 +107,7 @@ export async function main(options: MainOptions = {}): Promise<MainHandle> {
   const config = loadConfig(runtime.env);
   let logFile: string | undefined = path.join(config.stateDir, 'server.log');
   try {
+    // `mode` is not supported on Windows (fs.mkdir docs): the directory inherits %USERPROFILE%'s ACLs, the equivalent.
     await fsp.mkdir(config.stateDir, { recursive: true, mode: 0o700 });
   } catch (err) {
     config.problems.push(`cannot create RLB_STATE_DIR ${config.stateDir}: ${(err as Error).message}`);
@@ -116,6 +117,7 @@ export async function main(options: MainOptions = {}): Promise<MainHandle> {
   logger = log;
   log.info('starting', { version: SERVER_VERSION, pid: proc.pid, node: process.version, state_dir: config.stateDir });
   for (const p of config.problems) log.warn('config problem', p);
+  if (config.platform === 'win32') log.debug('state dir: mode 0700 is not applied on Windows; the directory inherits its parent ACLs', { state_dir: config.stateDir });
 
   const client = new BridgeClient({
     stateDir: config.stateDir,
@@ -194,6 +196,9 @@ export async function main(options: MainOptions = {}): Promise<MainHandle> {
   const shutdown = (why: string, code: number): Promise<void> => (closing ??= doShutdown(why, code));
   proc.on('SIGINT', () => void shutdown('SIGINT', 0));
   proc.on('SIGTERM', () => void shutdown('SIGTERM', 0));
+  // Windows: Ctrl+Break, the one signal a console can deliver besides SIGINT (SIGTERM cannot be received
+  // there; subprocess.kill() is TerminateProcess and runs no handler). Any platform may listen for it.
+  proc.on('SIGBREAK', () => void shutdown('SIGBREAK', 0));
   // In-flight tool calls finish first (the event loop drains on its own); the unref'd timer only
   // forces the exit when something keeps the loop alive.
   proc.stdin.on('end', () => {

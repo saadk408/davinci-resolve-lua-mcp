@@ -85,6 +85,18 @@ test('main() without options serves the 15 tools, never holds the lock while idl
   }
 });
 
+test('SIGBREAK (Windows Ctrl+Break) exits 0 like SIGTERM and releases the lock', async () => {
+  const r = await rig();
+  try {
+    r.proc.emit('SIGBREAK');
+    await r.handle.shutdown('test', 0);
+    assert.deepEqual(r.proc.exits, [0]);
+    assert.equal(await exists(r.lockPath), false);
+  } finally {
+    await r.close();
+  }
+});
+
 test('wrapServer sees the McpServer exactly once, and beforeExit is awaited before exit(0)', async () => {
   const events: string[] = [];
   let wrapCalls = 0;
