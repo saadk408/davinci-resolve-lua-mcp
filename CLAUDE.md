@@ -127,7 +127,8 @@ bridge/resolve_mcp_bridge.lua (Scripts-menu Lua state, holds live `resolve`)
   `server/index.js` (built, git-ignored, shipped), `bridge/resolve_mcp_bridge.lua`, `scripts/`
   (`claude_diag.lua` ships; `gen-types.mjs`, `dev-register.mjs`, `set-version.mjs`, `smoke.mjs`,
   `release-notes.sh`, `registry-entry.mjs` are developer-only), `types/resolve_host.d.lua` +
-  `.luarc.json` (Lua LSP), `tests/`, `docs/` (`windows.md`, the Windows assumptions and measurement
+  `.luarc.json` (Lua LSP), `.lsp.json` (Claude Code's TypeScript language-server config, see
+  "Language servers"), `tests/`, `docs/` (`windows.md`, the Windows assumptions and measurement
   checklist; `images/`, README screenshots; the MP4 recordings are git-ignored, GitHub-hosted),
   `.github/` (`workflows/tests.yml`, `workflows/release.yml`, `dependabot.yml`,
   `pull_request_template.md`), `CONTRIBUTING.md`, `SECURITY.md`, `PRIVACY.md`, `.gitattributes`
@@ -445,9 +446,9 @@ measured on.
 
 ## Language servers: use them
 
-Two LSP plugins back the `LSP` tool (line and character are 1-based and must sit on the identifier)
-and the diagnostics block the harness appends after every Write or Edit of a `.lua`, `.ts` or `.mjs`
-file.
+The `lua-lsp` plugin and the project `.lsp.json` back the `LSP` tool (line and character are 1-based
+and must sit on the identifier) and the diagnostics block the harness appends after a Write or Edit
+(Lua files today; the TypeScript server pushes none, see below).
 
 - Lua: the `lua-lsp` plugin (project scope, `.claude/settings.json`) wires the tool to a
   `lua-language-server` on PATH (Homebrew). `.luarc.json` sets `runtime.version` to `LuaJIT` (so
@@ -460,9 +461,18 @@ file.
   A method the LSP does not know means the `.pyi` changed. Never add a name to `diagnostics.globals`
   (it mutes typos). Claude Code's LSP client answers no configuration requests, so `.luarc.json` is
   the only channel; the server picks up file changes within a minute.
-- TypeScript: the `typescript-lsp` plugin (user scope) runs `typescript-language-server`, installed
-  globally under nvm's Node, so it is on PATH only in a shell that sourced nvm. No headless mode;
-  `npx tsc --noEmit` is the batch equivalent.
+- TypeScript: the project `.lsp.json` runs TypeScript 7's own language server from the workspace
+  install (`node ${CLAUDE_PROJECT_DIR}/node_modules/typescript/bin/tsc --lsp --stdio`; the compiler
+  binary is the server; `npm ci` first), so hover, definition, references and symbols come from the
+  same compiler version `make typecheck` runs. `node` must be on PATH (nvm; `Executable not found`
+  in `/plugin` means it is not). The marketplace `typescript-lsp` plugin is disabled in
+  `.claude/settings.json`: it needs the `tsserver` that TypeScript 7 no longer ships, and the first
+  server registered for `.ts` wins. `/reload-plugins` after changing `.lsp.json`. Measured
+  2026-09-22 (7.0.2): the server answers pull requests (`textDocument/diagnostic`) but pushes only
+  empty `publishDiagnostics` on open and close, never a type error after an edit, a request, a save
+  or a close, and Claude Code collects diagnostics from pushes only. So no TypeScript diagnostics
+  block appears after an edit: `npm run typecheck` (or `make test-node`) is the type gate, run it
+  before a commit.
 - After every edit, read the diagnostics block; a warning or error in a file you touched is part of
   the task: fix the code, or, when the diagnostic is wrong, fix what the server knows. Never silence
   one with `---@diagnostic disable`, `diagnostics.globals`, `// @ts-ignore`, `// @ts-expect-error` or
@@ -488,8 +498,10 @@ file.
   compare two prefs files, strip the `RLB` lines and leading whitespace, `sort`, then `diff`.
 - Large reference sources go into the session scratchpad via `curl`, then grep the relevant lines.
 - `.claude/settings.json` enables the `mcp-server-dev` plugin (its `build-mcpb` skill is the packaging
-  reference and `build-mcp-server` the tool-design reference) and `lua-lsp`; the repo-local
-  `create-readme` skill under `.claude/skills/` wrote the README.
+  reference and `build-mcp-server` the tool-design reference) and `lua-lsp`, and disables the
+  marketplace `typescript-lsp` plugin so the project's `.lsp.json` server is the one registered for
+  `.ts` files (the first registered server for an extension wins); the repo-local `create-readme`
+  skill under `.claude/skills/` wrote the README.
 - One-off live probes against the bridge: a scratch `.mjs` under `.out/` (git-ignored,
   bundle-ignored) that spawns `server/index.js` with `StdioClientTransport` and calls tools, as
   `scripts/smoke.mjs` does; a stat loop on `Fusion.prefs` around a call counts the bridge's saves.

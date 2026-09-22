@@ -20,6 +20,7 @@ SECURITY.md
 PRIVACY.md
 .github
 .luarc.json
+.lsp.json
 .gitattributes
 scripts/gen-types.mjs
 scripts/dev-register.mjs
