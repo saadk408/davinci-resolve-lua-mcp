@@ -189,3 +189,9 @@ test('a missing docs folder is a message, not a crash', async () => {
   assert.match(r.error, /Blackmagic scripting docs not found at \/nonexistent\/Scripting/);
   assert.match(r.error, /RLB_DOCS_DIR/);
 });
+
+test('CRLF copies of the shipped files index exactly like LF ones', () => {
+  const crlf = (s: string): string => s.replace(/\n/g, '\r\n');
+  assert.deepEqual(indexPyi(crlf(PYI), 'f.pyi'), indexPyi(PYI, 'f.pyi'));
+  assert.deepEqual(indexReadme(crlf(README), 'README.md'), indexReadme(README, 'README.md'));
+});

@@ -69,7 +69,7 @@ function docOf(lines: string[], i: number): string {
 }
 
 export function indexPyi(text: string, file: string): DocEntry[] {
-  const lines = text.split('\n');
+  const lines = text.split(/\r?\n/); // the shipped files may be CRLF on Windows
   const out: DocEntry[] = [];
   let cls: string | undefined;
   let dict: { name: string; line: number; fields: string[]; functional: boolean } | undefined;
@@ -158,7 +158,7 @@ const FUNC_LINE_RE = /^([A-Za-z_][\w.]*)\((.*?)\)\s+-->\s+(.*)$/;
 const BARE_IDENT_RE = /^[A-Z]\w*$/;
 
 export function indexReadme(text: string, file: string): DocEntry[] {
-  const lines = text.split('\n');
+  const lines = text.split(/\r?\n/); // the shipped files may be CRLF on Windows
   const out: DocEntry[] = [];
   let inFence = false;
   let section: { name: string; line: number; body: string[] } | undefined;
@@ -204,7 +204,7 @@ export function indexReadme(text: string, file: string): DocEntry[] {
 }
 
 export function indexChangelog(text: string, file: string): DocEntry[] {
-  const lines = text.split('\n');
+  const lines = text.split(/\r?\n/); // the shipped files may be CRLF on Windows
   const out: DocEntry[] = [];
   let section: { name: string; line: number; body: string[] } | undefined;
   const flush = (): void => {

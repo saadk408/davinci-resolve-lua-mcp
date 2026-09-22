@@ -35,10 +35,11 @@ export async function findPrefsFile(profilesDir: string): Promise<PrefsFile | un
   return best;
 }
 
-// Our values never contain a quote or a line break, so a line break before the closing quote
-// means the line is still being written (or the key is missing its value).
-const RESP_RE = /\bRLBResp = "([^"\n]*)"/g;
-const SESSION_RE = /\bRLBSession = "([^"\n]*)"/g;
+// Our values never contain a quote or a line break, so a line break (LF or CR) before the closing quote
+// means the line is still being written (or the key is missing its value). A CRLF file (Fusion on
+// Windows is unmeasured) still parses: its CR sits after the closing quote.
+const RESP_RE = /\bRLBResp = "([^"\r\n]*)"/g;
+const SESSION_RE = /\bRLBSession = "([^"\r\n]*)"/g;
 
 function lastMatch(re: RegExp, text: string): string | undefined {
   let last: string | undefined;

@@ -78,3 +78,13 @@ test('findPrefsFile picks the newest profile and tolerates a missing directory',
     await dirs.cleanup();
   }
 });
+
+test('a CRLF prefs file parses like an LF one, and a CR before the closing quote is a torn line', () => {
+  const crlf = (s: string): string => s.replace(/\n/g, '\r\n');
+  const lf = renderPrefs({ RLBResp: `abc:${hex(JSON.stringify(ENVELOPE))}`, RLBSession: hex('{"session":"s1","state":"running"}') });
+  assert.deepEqual(extractResp(crlf(lf)), extractResp(lf));
+  assert.equal(extractSessionHex(crlf(lf)), extractSessionHex(lf));
+  const half = renderPrefs({ RLBResp: 'abc:7b22', RLBSession: '' }, { unterminated: true });
+  assert.equal(extractResp(crlf(half)), undefined);
+  assert.equal(extractResp('RLBResp = "abc:7b\r22"'), undefined);
+});
