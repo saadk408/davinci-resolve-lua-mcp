@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import type { Logger } from './log.js';
 import { silentLogger } from './log.js';
 import { stateDirStampProblem } from './config.js';
+import { retryTransient } from './protocol.js';
 
 export const STAMP_TOKEN = '@@RLB_STATE_DIR@@';
 
@@ -72,6 +73,8 @@ export function stampLua(source: string, stateDir: string): string {
   return source.split(STAMP_TOKEN).join(stateDir);
 }
 
+// A persistent EBUSY (Windows: something else keeps the file open after the retries) is not a
+// permission problem: it falls through to outcome 'error', which the next resolve_status retries.
 function isPermission(err: unknown): boolean {
   const code = (err as NodeJS.ErrnoException | undefined)?.code;
   return code === 'EACCES' || code === 'EPERM' || code === 'EROFS';
@@ -81,7 +84,8 @@ async function writeAtomic(target: string, content: string): Promise<void> {
   const tmp = `${target}.tmp`;
   try {
     await fsp.writeFile(tmp, content, 'utf8');
-    await fsp.rename(tmp, target);
+    // Windows: an antivirus scanner or an editor holding the installed script refuses the replace for a moment.
+    await retryTransient(() => fsp.rename(tmp, target));
   } catch (err) {
     await fsp.unlink(tmp).catch(() => undefined);
     throw err;

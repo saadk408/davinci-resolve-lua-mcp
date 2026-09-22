@@ -104,6 +104,10 @@ export interface BridgeClientOptions {
   now?: (() => number) | undefined;
   sleep?: ((ms: number) => Promise<void>) | undefined;
   isPidAlive?: ((pid: number) => boolean) | undefined;
+  /** Test seam: the two calls Windows may refuse while the bridge holds next.lua open (default node:fs/promises). */
+  fs?: Pick<typeof fsp, 'unlink' | 'rename'> | undefined;
+  /** Platform whose path rules state_dir_match follows (default process.platform). */
+  platform?: NodeJS.Platform | undefined;
 }
 
 export const REQUEST_FILE = 'next.lua';
@@ -117,6 +121,11 @@ export const LOCK_TAKEOVER_FILE = 'lock.takeover';
 /** A takeover marker older than this belongs to a process that died inside its takeover; it is removed. */
 const LOCK_TAKEOVER_STALE_MS = 30_000;
 
+/**
+ * Signal 0 is Node's platform-independent existence test (on Windows libuv opens the process and
+ * checks its exit code: ESRCH once it is gone). EPERM means the pid exists but is not ours to
+ * signal (another user's, or an elevated Resolve on Windows), so it counts as alive.
+ */
 export function defaultIsPidAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -128,6 +137,57 @@ export function defaultIsPidAlive(pid: number): boolean {
 
 function errnoCode(err: unknown): string | undefined {
   return (err as NodeJS.ErrnoException | undefined)?.code;
+}
+
+/**
+ * The errno codes a Windows sharing violation surfaces as: libuv maps ERROR_SHARING_VIOLATION and
+ * ERROR_LOCK_VIOLATION to EBUSY and ERROR_ACCESS_DENIED to EPERM; EACCES is included for good
+ * measure. On POSIX these are permanent permission errors, so a caller pays at most
+ * FS_RETRY_ATTEMPTS x FS_RETRY_DELAY_MS (about a second) before seeing the same failure.
+ */
+export const TRANSIENT_FS_CODES: ReadonlySet<string> = new Set(['EBUSY', 'EPERM', 'EACCES']);
+export const FS_RETRY_ATTEMPTS = 20;
+export const FS_RETRY_DELAY_MS = 50;
+
+export interface RetryOptions {
+  attempts?: number | undefined;
+  delayMs?: number | undefined;
+  sleep?: ((ms: number) => Promise<void>) | undefined;
+}
+
+/**
+ * Run `fn`, retrying while it fails with a transient sharing error. Windows refuses unlink and
+ * rename-over of a file another process holds open without FILE_SHARE_DELETE, and the C fopen
+ * behind LuaJIT's loadfile grants no share-delete: the bridge re-loads next.lua every 50 ms while
+ * it exists, so the server's delete (and a rename onto a leftover) can be refused for a few ms.
+ */
+export async function retryTransient<T>(fn: () => Promise<T>, opts: RetryOptions = {}): Promise<T> {
+  const attempts = opts.attempts ?? FS_RETRY_ATTEMPTS;
+  const delayMs = opts.delayMs ?? FS_RETRY_DELAY_MS;
+  const sleep = opts.sleep ?? ((ms: number) => sleepFor(ms));
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (attempt >= attempts || !TRANSIENT_FS_CODES.has(errnoCode(err) ?? '')) throw err;
+      await sleep(delayMs);
+    }
+  }
+}
+
+/**
+ * Whether two spellings of the state dir name the same directory as the file system sees it.
+ * win32: `\` and `/` are one separator and case is ignored (the bridge may report the stamp's
+ * C:/..., a user-typed RLB_STATE_DIR with backslashes, or USERPROFILE .. "/.davinci-resolve-lua-mcp",
+ * mixed); POSIX: a trailing slash is dropped, nothing else.
+ */
+export function sameStateDir(a: string, b: string, platform: NodeJS.Platform): boolean {
+  const canon = (p: string): string => {
+    if (platform !== 'win32') return p.length > 1 ? p.replace(/\/+$/, '') : p;
+    const s = p.replace(/\\/g, '/');
+    return (s.length > 1 ? s.replace(/\/+$/, '') : s).toLowerCase();
+  };
+  return canon(a) === canon(b);
 }
 
 interface PollKey {
@@ -158,6 +218,8 @@ export class BridgeClient implements Bridge {
   private readonly now: () => number;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly isPidAlive: (pid: number) => boolean;
+  private readonly fs: Pick<typeof fsp, 'unlink' | 'rename'>;
+  private readonly platform: NodeJS.Platform;
   private chain: Promise<unknown> = Promise.resolve();
   private lockOwned = false;
   private lockHolder: number | undefined;
@@ -177,6 +239,8 @@ export class BridgeClient implements Bridge {
     this.now = opts.now ?? Date.now;
     this.sleep = opts.sleep ?? ((ms) => sleepFor(ms));
     this.isPidAlive = opts.isPidAlive ?? defaultIsPidAlive;
+    this.fs = opts.fs ?? fsp;
+    this.platform = opts.platform ?? process.platform;
   }
 
   get lock(): LockStatus {
@@ -374,7 +438,7 @@ export class BridgeClient implements Bridge {
       throw new BridgeError(
         'lock_held',
         `cannot take the request slot lock ${this.lockPath} (${this.lockProblem ?? 'unknown problem'})`,
-        'check that RLB_STATE_DIR is writable, or point RLB_STATE_DIR elsewhere',
+        'the lock is a hard link, so RLB_STATE_DIR must be a writable directory on a local NTFS/ReFS (Windows) or APFS/HFS+ (macOS) volume, not FAT/exFAT, a network share or a cloud-synced folder; fix that or point RLB_STATE_DIR elsewhere',
         { lock: this.lockPath },
       );
     }
@@ -404,7 +468,7 @@ export class BridgeClient implements Bridge {
     let removed = false;
     for (const p of [this.requestPath, this.tmpPath]) {
       try {
-        await fsp.unlink(p);
+        await retryTransient(() => this.fs.unlink(p), { sleep: this.sleep });
         removed = true;
         this.log.info('removed a leftover request file', { path: p });
       } catch (err) {
@@ -548,7 +612,8 @@ export class BridgeClient implements Bridge {
     });
     try {
       await fsp.writeFile(this.tmpPath, body, 'utf8');
-      await fsp.rename(this.tmpPath, this.requestPath);
+      // A leftover next.lua the bridge has open makes the rename-over fail on Windows for a few ms.
+      await retryTransient(() => this.fs.rename(this.tmpPath, this.requestPath), { sleep: this.sleep });
     } catch (err) {
       await fsp.unlink(this.tmpPath).catch(() => undefined);
       throw new BridgeError(
@@ -607,8 +672,15 @@ export class BridgeClient implements Bridge {
         }
       }
     } finally {
-      // The bridge cannot delete files; a slot that stays occupied is never re-run (same id).
-      await fsp.unlink(this.requestPath).catch(() => undefined);
+      // The bridge cannot delete files; a slot that stays occupied is never re-run (same id). Windows
+      // may refuse the delete for a few ms while the bridge's loadfile holds the file: retried, then logged.
+      try {
+        await retryTransient(() => this.fs.unlink(this.requestPath), { sleep: this.sleep });
+      } catch (err) {
+        if (errnoCode(err) !== 'ENOENT') {
+          this.log.warn('cannot remove the request file; the next request replaces it', { path: this.requestPath, error: (err as Error).message });
+        }
+      }
     }
   }
 
@@ -640,7 +712,7 @@ export class BridgeClient implements Bridge {
         out.session = session;
         if (session.pid !== undefined && session.pid > 0) out.pid_alive = this.isPidAlive(session.pid);
         if (session.state_dir !== undefined) {
-          out.state_dir_match = stripSlash(session.state_dir) === stripSlash(this.stateDir);
+          out.state_dir_match = sameStateDir(session.state_dir, this.stateDir, this.platform);
         }
       }
       this.requireRunning(session, 'ping');
@@ -674,10 +746,6 @@ export class BridgeClient implements Bridge {
     }
     return out;
   }
-}
-
-function stripSlash(p: string): string {
-  return p.length > 1 ? p.replace(/\/+$/, '') : p;
 }
 
 function kindToReason(kind: BridgeErrorKind): StatusReason {

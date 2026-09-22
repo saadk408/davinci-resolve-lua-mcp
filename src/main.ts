@@ -123,6 +123,7 @@ export async function main(options: MainOptions = {}): Promise<MainHandle> {
     maxResponseKb: config.maxResponseKb,
     logger: log,
     pid: proc.pid,
+    platform: config.platform,
   });
   bridge = client;
   // The lock is taken per request, never held while idle (Claude Desktop keeps an idle era-probe

@@ -6,6 +6,7 @@
 // error envelopes with result null and prints) and offers failure modes for the protocol tests.
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
+import { retryTransient } from '../../src/protocol.js';
 
 export const BRIDGE_TAG = 'resolve_mcp_bridge v0.1.0';
 
@@ -212,7 +213,8 @@ export async function startFakeBridge(opts: FakeBridgeOptions): Promise<FakeBrid
   async function writeFile(values: Record<string, string>, renderOpts: { unterminated?: boolean } = {}): Promise<void> {
     const tmp = `${prefsPath}.tmp${process.pid}`;
     await fsp.writeFile(tmp, renderPrefs(values, renderOpts), 'utf8');
-    await fsp.rename(tmp, prefsPath);
+    // Node holds Fusion.prefs open with share-delete, so the replace normally succeeds on Windows; an AV scanner does not.
+    await retryTransient(() => fsp.rename(tmp, prefsPath), { delayMs: 10 });
   }
 
   const writeSession = async (st: 'running' | 'stopped' | 'error' = state, extra: Record<string, unknown> = {}): Promise<void> => {

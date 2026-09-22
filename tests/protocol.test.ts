@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
-import { BridgeClient, BridgeError, LOCK_FILE, LOCK_TAKEOVER_FILE, REQUEST_FILE } from '../src/protocol.js';
+import { BridgeClient, BridgeError, FS_RETRY_DELAY_MS, LOCK_FILE, LOCK_TAKEOVER_FILE, REQUEST_FILE, retryTransient, sameStateDir } from '../src/protocol.js';
 import { hex, startFakeBridge, type FakeBridge, type FakeBridgeOptions } from './helpers/fakeBridge.js';
 import { exists, makeTempDirs, sleep, waitFor, type TempDirs } from './helpers/tmp.js';
 
@@ -406,5 +406,95 @@ test('the session written by a bridge is re-read on every request (never cached)
     }
   } finally {
     await r.close();
+  }
+});
+
+// Windows file semantics: the bridge's loadfile holds next.lua open without share-delete, so the
+// server's delete and rename-over can be refused (EBUSY/EPERM) for a few ms. The fake bridge is
+// Node-to-Node and never reproduces that, so the retry is proven through the injected fs seam.
+const errno = (code: string): NodeJS.ErrnoException => Object.assign(new Error(code), { code });
+
+test('retryTransient: EBUSY/EPERM/EACCES are retried with the injected sleep and bounded; other codes throw at once', async () => {
+  const slept: number[] = [];
+  const sleepSpy = async (ms: number): Promise<void> => {
+    slept.push(ms);
+  };
+  let n = 0;
+  const flaky = async (): Promise<string> => {
+    if (++n <= 2) throw errno('EBUSY');
+    return 'ok';
+  };
+  assert.equal(await retryTransient(flaky, { sleep: sleepSpy }), 'ok');
+  assert.deepEqual(slept, [FS_RETRY_DELAY_MS, FS_RETRY_DELAY_MS]);
+  await assert.rejects(
+    retryTransient(async () => {
+      throw errno('ENOENT');
+    }, { sleep: sleepSpy }),
+    /ENOENT/,
+  );
+  assert.equal(slept.length, 2, 'ENOENT never sleeps');
+  await assert.rejects(
+    retryTransient(async () => {
+      throw errno('EPERM');
+    }, { sleep: sleepSpy, attempts: 3 }),
+    /EPERM/,
+  );
+  assert.equal(slept.length, 4, 'bounded: attempts - 1 sleeps');
+});
+
+test('a request survives a slot delete and a rename that Windows would refuse twice (EBUSY), and the slot is still cleaned up', async () => {
+  const dirs = await makeTempDirs();
+  const fake = await startFakeBridge({ stateDir: dirs.stateDir, prefsDir: dirs.prefsDir });
+  const calls = { unlink: 0, rename: 0 };
+  const flakyFs = {
+    unlink: async (p: fsp.FileHandle | string | Buffer | URL): Promise<void> => {
+      if (++calls.unlink <= 2) throw errno('EBUSY');
+      return fsp.unlink(p as string);
+    },
+    rename: async (a: string | Buffer | URL, b: string | Buffer | URL): Promise<void> => {
+      if (++calls.rename <= 2) throw errno('EBUSY');
+      return fsp.rename(a, b);
+    },
+  } as Pick<typeof fsp, 'unlink' | 'rename'>;
+  // Only the retry's own sleeps are short-circuited; the prefs poll keeps its real cadence.
+  const quick = (ms: number): Promise<void> => (ms === FS_RETRY_DELAY_MS ? Promise.resolve() : sleep(ms));
+  const client = new BridgeClient({ stateDir: dirs.stateDir, prefsDir: dirs.prefsDir, maxResponseKb: 64, pollMs: 5, fs: flakyFs, sleep: quick });
+  try {
+    const env = await client.run('return 1', 2000);
+    assert.equal(env.ok, true);
+    assert.equal(calls.rename, 3, 'two refusals, then the rename');
+    assert.equal(calls.unlink, 3, 'two refusals, then the delete');
+    assert.equal(await exists(path.join(dirs.stateDir, REQUEST_FILE)), false, 'the slot is cleaned up');
+  } finally {
+    fake.stop();
+    client.releaseLockSync();
+    await dirs.cleanup();
+  }
+});
+
+test('sameStateDir: win32 ignores separator style and case, POSIX only a trailing slash', () => {
+  assert.equal(sameStateDir('C:\\Users\\X\\.davinci-resolve-lua-mcp\\', 'c:/users/x/.davinci-resolve-lua-mcp', 'win32'), true);
+  assert.equal(sameStateDir('C:\\Users\\x/.davinci-resolve-lua-mcp', 'C:/Users/x/.davinci-resolve-lua-mcp', 'win32'), true);
+  assert.equal(sameStateDir('C:/Users/x/other', 'C:/Users/x/.davinci-resolve-lua-mcp', 'win32'), false);
+  assert.equal(sameStateDir('/a/b/', '/a/b', 'darwin'), true);
+  assert.equal(sameStateDir('/a/B', '/a/b', 'darwin'), false);
+  assert.equal(sameStateDir('/a/b', '\\a\\b', 'darwin'), false);
+});
+
+test('status(): a bridge that spells the same state dir the Windows way matches on win32 only', async () => {
+  const dirs = await makeTempDirs();
+  const win = dirs.stateDir.replace(/\//g, '\\').toUpperCase();
+  const fake = await startFakeBridge({ stateDir: dirs.stateDir, prefsDir: dirs.prefsDir, bridgeStateDir: win });
+  const base = { stateDir: dirs.stateDir, prefsDir: dirs.prefsDir, maxResponseKb: 64, pollMs: 5, pingTimeoutMs: 400 };
+  const onWindows = new BridgeClient({ ...base, platform: 'win32' });
+  const onMac = new BridgeClient({ ...base, platform: 'darwin' });
+  try {
+    assert.equal((await onWindows.status()).state_dir_match, true);
+    assert.equal((await onMac.status()).state_dir_match, false);
+  } finally {
+    fake.stop();
+    onWindows.releaseLockSync();
+    onMac.releaseLockSync();
+    await dirs.cleanup();
   }
 });
