@@ -46,5 +46,9 @@ The Windows paths follow Blackmagic's documented layout and were not measured on
 
 This bundle is not code-signed. Claude Desktop installs it as an unsigned extension; an organisation policy that blocks unsigned extensions will refuse it. A signed build will replace it once the maintainer's certificate is issued.
 
+## Provenance
+
+The workflow run that built this file recorded a build-provenance attestation for it (Sigstore, public transparency log). Verify a download with `gh attestation verify davinci-resolve-lua-mcp.mcpb -R saadk408/davinci-resolve-lua-mcp`.
+
 EOF
 printf '## Checksum\n\nSHA-256 of `%s`: `%s`\n' "$name" "$sha"

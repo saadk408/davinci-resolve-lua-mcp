@@ -210,9 +210,10 @@ Targets (`Makefile`; the README has the table): `test` = `test-lua` + `test-node
   deletion only for the repository admin role, verified with GraphQL `repositoryRoleName` because
   REST returns only the numeric id), squash-only merge settings with `PR_TITLE` and `PR_BODY` as
   the commit message, head branches auto-deleted, auto-merge allowed (`gh pr merge --squash
-  --auto`); `sha_pinning_required`, Dependabot alerts, secret-scanning non-provider patterns and
-  immutable releases on. A contributor's first PR from a fork waits for the maintainer's approval
-  before its checks run.
+  --auto`); `sha_pinning_required` and Dependabot alerts on; immutable releases on (Settings >
+  Releases, the one UI-only switch). Secret scanning and push protection were already on; the
+  non-provider-patterns toggle ignores the API on this repository and stays off. A contributor's
+  first PR from a fork waits for the maintainer's approval before its checks run.
 - Releasing: on a `chore/release-X.Y.Z` branch, `node scripts/set-version.mjs X.Y.Z` writes
   `package.json`, `manifest.json` and `SERVER_VERSION` (textual edits of the version line;
   `manifest.json` is hand-formatted); when the Lua changed, also the bridge header (line 1 and
