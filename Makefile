@@ -68,13 +68,13 @@ lint-lua:
 gen-types:
 	@$(NVM) && node scripts/gen-types.mjs
 
-## Validate the manifest and the icon (mcpb validate on the directory), pack the bundle (what .mcpbignore leaves in), print it, then gate it with
-## tests/check_bundle.sh (exact file list, size under 2 MB, unpack + tools/list probe under a temp
-## state dir with the self-install off). Packs differ byte-wise (zip mtime); compare `zipinfo -1`.
+## `npm run bundle` (npm puts the pinned mcpb on PATH on every platform; the Windows CI job runs the
+## same script without make): mcpb validate on the directory, pack (what .mcpbignore leaves in),
+## info, then the gate tests/check_bundle.mjs (exact file list via mcpb unpack, size under 2 MB, a
+## tools/list + resolve_status probe under temp dirs with the self-install off). Packs differ
+## byte-wise (zip mtime); compare `zipinfo -1`.
 bundle: build
-	@mkdir -p dist
-	@$(NVM) && $(MCPB) validate . && $(MCPB) pack . $(BUNDLE) && $(MCPB) info $(BUNDLE)
-	@$(NVM) && sh tests/check_bundle.sh $(BUNDLE)
+	@$(NVM) && npm run bundle
 
 ## Open the bundle so Claude Desktop shows its install dialog; the click is the user's.
 install: bundle

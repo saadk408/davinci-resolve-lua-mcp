@@ -15,7 +15,9 @@
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build": "npm run typecheck && esbuild src/index.ts --bundle --platform=node --format=cjs --target=node20 --outfile=server/index.js --log-level=warning",
-    "test": "node --import tsx --test tests/*.test.ts"
+    "test": "node --import tsx --test tests/*.test.ts",
+    "prebundle": "node -e \"require('node:fs').mkdirSync('dist', { recursive: true })\"",
+    "bundle": "mcpb validate . && mcpb pack . dist/davinci-resolve-lua-mcp.mcpb && mcpb info dist/davinci-resolve-lua-mcp.mcpb && node tests/check_bundle.mjs dist/davinci-resolve-lua-mcp.mcpb"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.0.0",
