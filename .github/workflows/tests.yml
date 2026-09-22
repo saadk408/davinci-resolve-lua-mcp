@@ -1,7 +1,14 @@
 # The Node-side gates on a macOS runner: the src/ grep gates, tsc, the node --test suite, then
-# `make bundle` (mcpb validate + pack + tests/check_bundle.sh). The Lua tests (`make test-lua`)
+# `make bundle` (mcpb validate + pack + tests/check_bundle.mjs). The Lua tests (`make test-lua`)
 # need fuscript from a DaVinci Resolve installation and the smoke test needs a live bridge, so
 # neither runs here: run `make test` on a Mac with Resolve before a release.
+#
+# The windows job runs the same gates without make (the runner has no GNU make): npm and node
+# directly, the shell gates and the test glob under Git Bash. It proves the server builds, boots,
+# packs and answers tools/list and resolve_status on Windows with Windows defaults; nothing about
+# Resolve on Windows is measured (docs/windows.md). Node 20 only: the engines floor and the esbuild
+# target; the macOS matrix covers 24. .gitattributes keeps the checkout LF (the runner's Git has
+# core.autocrlf=true).
 name: tests
 
 on:
@@ -28,3 +35,30 @@ jobs:
       - run: npm ci
       - run: make test-node
       - run: make bundle
+
+  windows:
+    name: windows node 20
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+      - name: The checkout is LF (.gitattributes applied)
+        run: |
+          if git ls-files --eol | grep -E '^i/(lf|-text) +w/crlf'; then
+            echo "::error::CRLF in the working tree; .gitattributes must force eol=lf"
+            exit 1
+          fi
+      - run: npm ci
+      - run: bash tests/check_server.sh src
+      - run: bash tests/lua/check_bridge.sh bridge/resolve_mcp_bridge.lua
+      - run: npm run typecheck
+      - run: npm run build
+      - run: node --import tsx --test tests/*.test.ts
+      - run: npm run bundle
