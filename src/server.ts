@@ -84,6 +84,12 @@ export interface ServerDeps {
    * Lua-side failure, never from resolve_status). A throw inside the hook is logged and ignored.
    */
   onToolFailure?: ((error: BridgeError, tool: ToolName) => void) | undefined;
+  /**
+   * The same extension point for everything else a tool body throws (a defect, not a bridge
+   * state): called with the thrown value and the tool name where guard() logs it as a bug and
+   * turns it into an isError result. Never for a BridgeError. A throw inside is logged and ignored.
+   */
+  onToolError?: ((error: unknown, tool: ToolName) => void) | undefined;
 }
 
 // ---- result helpers -------------------------------------------------------------------------
@@ -170,7 +176,7 @@ export function createServer(deps: ServerDeps): McpServer {
     return { data: rest, env };
   }
 
-  /** Every tool body runs under guard: a thrown BridgeError becomes an isError result (and reaches onToolFailure); anything else is logged as a bug. */
+  /** Every tool body runs under guard: a thrown BridgeError becomes an isError result (and reaches onToolFailure); anything else is logged as a bug (and reaches onToolError). */
   function guard(tool: ToolName, fn: () => Promise<ToolResult>): Promise<ToolResult> {
     return fn().catch((err: unknown) => {
       if (err instanceof BridgeError) {
@@ -181,6 +187,11 @@ export function createServer(deps: ServerDeps): McpServer {
         }
       } else {
         logger.error('tool failed', err);
+        try {
+          deps.onToolError?.(err, tool);
+        } catch (hookErr) {
+          logger.error('onToolError hook threw', hookErr);
+        }
       }
       return failFrom(err);
     });

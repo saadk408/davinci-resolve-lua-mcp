@@ -7,6 +7,9 @@
 //                           the transport gets it; must return that McpServer or a Proxy over it
 //                           (serveStdio checks `instanceof McpServer`)
 //   onToolFailure(err, t)   forwarded to createServer (ServerDeps.onToolFailure)
+//   onToolError(err, t)     forwarded to createServer (ServerDeps.onToolError)
+//   onBridgeRequest(r)      forwarded to the BridgeClient (BridgeClientOptions.onRequest): one
+//                           BridgeRequestReport per request, in the calling tool's async context
 //   beforeExit()            awaited, with a cap, on every exit path: the clean shutdown before the
 //                           lock is released and the crash handlers before exit(1), so a monitoring
 //                           flush is never cut short
@@ -19,7 +22,7 @@ import { installBridgeFiles, type InstallResult } from './bridgeInstall.js';
 import { loadConfig } from './config.js';
 import { DocsIndex } from './docsSearch.js';
 import { createLogger, type Logger } from './log.js';
-import { BridgeClient, type BridgeError } from './protocol.js';
+import { BridgeClient, type BridgeError, type BridgeRequestReport } from './protocol.js';
 import { createServer, SERVER_VERSION, type ToolName } from './server.js';
 
 /** The bundle root (holds bridge/ and scripts/) both from src/ in development and from server/ in the bundle. */
@@ -50,6 +53,8 @@ export interface MainRuntime {
 export interface MainOptions {
   wrapServer?: ((server: McpServer) => McpServer) | undefined;
   onToolFailure?: ((error: BridgeError, tool: ToolName) => void) | undefined;
+  onToolError?: ((error: unknown, tool: ToolName) => void) | undefined;
+  onBridgeRequest?: ((report: BridgeRequestReport) => void) | undefined;
   beforeExit?: (() => Promise<void>) | undefined;
   runtime?: Partial<MainRuntime> | undefined;
 }
@@ -126,6 +131,7 @@ export async function main(options: MainOptions = {}): Promise<MainHandle> {
     logger: log,
     pid: proc.pid,
     platform: config.platform,
+    onRequest: options.onBridgeRequest,
   });
   bridge = client;
   // The lock is taken per request, never held while idle (Claude Desktop keeps an idle era-probe
@@ -168,7 +174,7 @@ export async function main(options: MainOptions = {}): Promise<MainHandle> {
   };
 
   const factory = (): McpServer => {
-    const server = createServer({ config, bridge: client, docs, install, logger: log, logFile, onToolFailure: options.onToolFailure });
+    const server = createServer({ config, bridge: client, docs, install, logger: log, logFile, onToolFailure: options.onToolFailure, onToolError: options.onToolError });
     return options.wrapServer ? options.wrapServer(server) : server;
   };
   const handle = serveStdio(factory, {

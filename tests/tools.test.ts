@@ -56,7 +56,7 @@ interface Rig {
   close(): Promise<void>;
 }
 
-async function rig(bridge: Bridge = new StubBridge(), env: NodeJS.ProcessEnv = {}, extra: Pick<ServerDeps, 'onToolFailure'> = {}): Promise<Rig> {
+async function rig(bridge: Bridge = new StubBridge(), env: NodeJS.ProcessEnv = {}, extra: Pick<ServerDeps, 'onToolFailure' | 'onToolError'> = {}): Promise<Rig> {
   const dirs = await makeTempDirs();
   const config = loadConfig({ RLB_STATE_DIR: dirs.stateDir, RLB_PREFS_DIR: dirs.prefsDir, RLB_DOCS_DIR: dirs.docsDir, RLB_SCRIPTS_DIR: dirs.scriptsDir, ...env }, dirs.root);
   const install: InstallResult = { outcome: 'up_to_date', message: 'current', scripts_dir: dirs.scriptsDir, state_dir: dirs.stateDir, files: [], checked_at: 'now' };
@@ -451,6 +451,44 @@ test('onToolFailure: one call per BridgeError with the tool name; silent on succ
     const status = await r.client.callTool({ name: 'resolve_status', arguments: {} });
     assert.notEqual(status.isError, true);
     assert.equal(seen.length, 2, 'Lua-side failures and resolve_status never reach the hook');
+  } finally {
+    await r.close();
+  }
+});
+
+test('onToolError: a non-BridgeError throw reaches it with the tool name, a BridgeError never does; survives a throwing hook', async () => {
+  const errors: Array<[unknown, string]> = [];
+  const failures: string[] = [];
+  let throwNext = false;
+  const defect = new TypeError('cannot read properties of undefined');
+  const stub = new StubBridge().reply(
+    defect,
+    new BridgeError('timeout', 'the bridge did not answer', 'retry', {}),
+    new RangeError('second defect'),
+  );
+  const r = await rig(stub, {}, {
+    onToolFailure: (err) => failures.push(err.kind),
+    onToolError: (err, tool) => {
+      errors.push([err, tool]);
+      if (throwNext) throw new Error('hook exploded');
+    },
+  });
+  try {
+    const bug = await r.client.callTool({ name: 'run_lua', arguments: { code: 'return 1' } });
+    assert.equal(bug.isError, true);
+    assert.equal(errors.length, 1);
+    assert.equal(errors[0]?.[0], defect, 'the thrown value itself');
+    assert.equal(errors[0]?.[1], 'run_lua');
+
+    const bridgeFailure = await r.client.callTool({ name: 'run_lua', arguments: { code: 'return 1' } });
+    assert.equal(bridgeFailure.isError, true);
+    assert.equal(errors.length, 1, 'a BridgeError never reaches onToolError');
+    assert.deepEqual(failures, ['timeout'], 'it goes to onToolFailure');
+
+    throwNext = true;
+    const second = await r.client.callTool({ name: 'list_timelines', arguments: {} });
+    assert.equal(second.isError, true, 'a throwing hook does not change the result');
+    assert.equal(errors[1]?.[1], 'list_timelines');
   } finally {
     await r.close();
   }

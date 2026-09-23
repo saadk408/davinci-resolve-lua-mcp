@@ -389,14 +389,20 @@ measured on.
   skip output validation. Context7 id `/modelcontextprotocol/typescript-sdk` (`main`) is the v2 SDK;
   check versions with `npm view @modelcontextprotocol/server version` (`npm view
   @modelcontextprotocol/sdk` shows only the legacy line).
-- `main(options)` in `src/main.ts` is the wiring; `src/index.ts` is `void main()`. Its three hooks are
+- `main(options)` in `src/main.ts` is the wiring; `src/index.ts` is `void main()`. Its five hooks are
   a stable extension surface for downstream builds that import `main`, no-ops by default:
   `wrapServer` (applied in the `serveStdio` factory right after `createServer`; must return that
   `McpServer` or a Proxy over it, `serveStdio` checks `instanceof`), `onToolFailure` (called from
   `guard(tool, fn)` in `server.ts` wherever a thrown `BridgeError` becomes an `isError` result; never
-  on success, never for Lua-side failures, never from `resolve_status`; a throw inside it is logged
-  and ignored) and `beforeExit` (awaited on every exit path behind a ref'd 2 s timer, ref'd on
-  purpose so Node cannot exit before `exit(code)`). `options.runtime` (`env`, `proc`, `transport`,
+  on success, never for Lua-side failures, never from `resolve_status`), `onToolError` (the same
+  place, for anything else a tool body throws: a defect, logged as `tool failed`; never for a
+  `BridgeError`), `onBridgeRequest` (passed to `BridgeClient` as `onRequest`: one
+  `BridgeRequestReport` per request after it ends, success or failure, with epoch-ms phase times
+  `started_at`/`lock_acquired_at`/`written_at`/`finished_at`, `polls`, `request_bytes`, `outcome`,
+  `lua_ok`, `bridge_ms`; no code, paths or response body; called in the calling tool's async
+  context, `status()` pings included) and `beforeExit` (awaited on every exit path behind a ref'd
+  2 s timer, ref'd on purpose so Node cannot exit before `exit(code)`). A throw inside any of the
+  three observers is logged and ignored, never changing a result. `options.runtime` (`env`, `proc`, `transport`,
   `beforeExitCapMs`) is a test seam: `tests/main.test.ts` drives `main()` in-process with a fake
   `EventEmitter` process and the server half of `InMemoryTransport.createLinkedPair()`. Never register
   on the real `process` in a test: a `node --test` child's stdin ends at once and would arm a real
