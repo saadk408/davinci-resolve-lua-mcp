@@ -10,6 +10,7 @@ import { Client } from '@modelcontextprotocol/client';
 import { InMemoryTransport, McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 import { main, type MainHandle, type MainOptions } from '../src/main.js';
+import type { BridgeRequestReport } from '../src/protocol.js';
 import { startFakeBridge } from './helpers/fakeBridge.js';
 import { exists, makeTempDirs, waitFor, type TempDirs } from './helpers/tmp.js';
 
@@ -202,6 +203,23 @@ test('onToolFailure passed to main() reaches the tools; shutdown is idempotent',
     assert.equal(first, second, 'later calls return the first shutdown');
     await first;
     assert.deepEqual(r.proc.exits, [0]);
+  } finally {
+    await r.close();
+  }
+});
+
+test('onBridgeRequest passed to main() gets one report per bridge request, matching the tool result', async () => {
+  const reports: BridgeRequestReport[] = [];
+  const errors: unknown[] = [];
+  const r = await rig({ onBridgeRequest: (report) => reports.push(report), onToolError: (err) => errors.push(err) });
+  try {
+    const res = await r.client.callTool({ name: 'run_lua', arguments: { code: 'return 1' } });
+    assert.equal(res.isError, true, 'no bridge is running');
+    const kind = (res.structuredContent as Record<string, unknown>)['kind'];
+    const runs = reports.filter((rep) => rep.op === 'run');
+    assert.equal(runs.length, 1);
+    assert.equal(runs[0]?.outcome, kind, 'the report names the same failure the tool returned');
+    assert.deepEqual(errors, [], 'a bridge failure is not a tool defect');
   } finally {
     await r.close();
   }

@@ -49,6 +49,30 @@ export class BridgeError extends Error {
   }
 }
 
+/**
+ * What one request did, handed to the optional `onRequest` observer once it has ended, on success
+ * and on every failure. Times are epoch milliseconds from the client's clock; a phase that was
+ * never reached is absent (no `lock_acquired_at` after `lock_held`, no `written_at` when the
+ * request file could not be written). It carries no Lua code, no paths and no response body.
+ */
+export interface BridgeRequestReport {
+  op: RequestOp;
+  started_at: number;
+  lock_acquired_at?: number;
+  written_at?: number;
+  finished_at: number;
+  /** Prefs polls spent waiting for the reply. */
+  polls: number;
+  /** UTF-8 size of the request file. */
+  request_bytes?: number;
+  /** `ok` when an envelope came back (even one reporting a Lua error), else the failure kind. */
+  outcome: 'ok' | BridgeErrorKind | 'unexpected';
+  /** The envelope's own `ok`: false when the Lua chunk raised. */
+  lua_ok?: boolean;
+  /** How long the bridge says the chunk ran. */
+  bridge_ms?: number;
+}
+
 export interface RequestOptions {
   code?: string | undefined;
   timeoutMs: number;
@@ -108,6 +132,11 @@ export interface BridgeClientOptions {
   fs?: Pick<typeof fsp, 'unlink' | 'rename'> | undefined;
   /** Platform whose path rules state_dir_match follows (default process.platform). */
   platform?: NodeJS.Platform | undefined;
+  /**
+   * Observer called once per request after it has ended (see BridgeRequestReport), in the caller's
+   * async context; a throw inside it is logged and ignored, so it can never change a request.
+   */
+  onRequest?: ((report: BridgeRequestReport) => void) | undefined;
 }
 
 export const REQUEST_FILE = 'next.lua';
@@ -220,6 +249,7 @@ export class BridgeClient implements Bridge {
   private readonly isPidAlive: (pid: number) => boolean;
   private readonly fs: Pick<typeof fsp, 'unlink' | 'rename'>;
   private readonly platform: NodeJS.Platform;
+  private readonly onRequest: ((report: BridgeRequestReport) => void) | undefined;
   private chain: Promise<unknown> = Promise.resolve();
   private lockOwned = false;
   private lockHolder: number | undefined;
@@ -241,6 +271,7 @@ export class BridgeClient implements Bridge {
     this.isPidAlive = opts.isPidAlive ?? defaultIsPidAlive;
     this.fs = opts.fs ?? fsp;
     this.platform = opts.platform ?? process.platform;
+    this.onRequest = opts.onRequest;
   }
 
   get lock(): LockStatus {
@@ -577,16 +608,38 @@ export class BridgeClient implements Bridge {
 
   private async requestLocked(op: RequestOp, opts: RequestOptions): Promise<Envelope> {
     const entry = this.now();
-    await this.ensureLock(opts.timeoutMs);
+    const report: BridgeRequestReport = { op, started_at: entry, finished_at: entry, polls: 0, outcome: 'ok' };
     try {
-      return await this.exchange(op, opts, entry);
+      await this.ensureLock(opts.timeoutMs);
+      report.lock_acquired_at = this.now();
+      try {
+        const env = await this.exchange(op, opts, entry, report);
+        report.lua_ok = env.ok;
+        if (env.ms !== undefined) report.bridge_ms = env.ms;
+        return env;
+      } finally {
+        this.releaseLockSync();
+      }
+    } catch (err) {
+      report.outcome = err instanceof BridgeError ? err.kind : 'unexpected';
+      throw err;
     } finally {
-      this.releaseLockSync();
+      report.finished_at = this.now();
+      this.emitReport(report);
+    }
+  }
+
+  private emitReport(report: BridgeRequestReport): void {
+    if (!this.onRequest) return;
+    try {
+      this.onRequest(report);
+    } catch (err) {
+      this.log.error('onRequest hook threw', err);
     }
   }
 
   /** The request/response exchange proper; the caller holds the lock and releases it afterwards. */
-  private async exchange(op: RequestOp, opts: RequestOptions, entry: number): Promise<Envelope> {
+  private async exchange(op: RequestOp, opts: RequestOptions, entry: number, report: BridgeRequestReport): Promise<Envelope> {
     const prefs = await this.locatePrefs();
     const text = await this.readText(prefs.path);
     // Read fresh every time: a stale session id sent to a live bridge makes that bridge exit.
@@ -623,6 +676,8 @@ export class BridgeClient implements Bridge {
         { id },
       );
     }
+    report.written_at = this.now();
+    report.request_bytes = Buffer.byteLength(body, 'utf8');
     this.log.debug('request written', { id, op, bytes: body.length });
 
     const started = this.now();
@@ -632,6 +687,7 @@ export class BridgeClient implements Bridge {
       for (;;) {
         await this.sleep(this.pollMs);
         polls += 1;
+        report.polls = polls;
         let st: fs.Stats | undefined;
         try {
           st = await fsp.stat(prefs.path);

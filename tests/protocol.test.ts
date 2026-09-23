@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
-import { BridgeClient, BridgeError, FS_RETRY_DELAY_MS, LOCK_FILE, LOCK_TAKEOVER_FILE, REQUEST_FILE, retryTransient, sameStateDir } from '../src/protocol.js';
+import { BridgeClient, BridgeError, type BridgeRequestReport, FS_RETRY_DELAY_MS, LOCK_FILE, LOCK_TAKEOVER_FILE, REQUEST_FILE, retryTransient, sameStateDir } from '../src/protocol.js';
 import { hex, startFakeBridge, type FakeBridge, type FakeBridgeOptions } from './helpers/fakeBridge.js';
 import { exists, makeTempDirs, sleep, waitFor, type TempDirs } from './helpers/tmp.js';
 
@@ -330,6 +330,72 @@ test('the lock is taken per request: a busy slot is waited for and the lock is g
     await fsp.unlink(lockPath);
   } finally {
     await r.close();
+  }
+});
+
+test('onRequest: one report per request with ordered phases for success, timeout and lock_held; a throwing observer changes nothing', async () => {
+  const reports: BridgeRequestReport[] = [];
+  const r = await rig({}, { onRequest: (report) => reports.push({ ...report }) });
+  try {
+    const env = await r.client.run('return 1', 1000);
+    assert.equal(env.ok, true);
+    assert.equal(reports.length, 1);
+    const ok = reports[0]!;
+    assert.equal(ok.op, 'run');
+    assert.equal(ok.outcome, 'ok');
+    assert.equal(ok.lua_ok, true);
+    assert.ok(ok.lock_acquired_at !== undefined && ok.written_at !== undefined);
+    assert.ok(ok.started_at <= ok.lock_acquired_at && ok.lock_acquired_at <= ok.written_at && ok.written_at <= ok.finished_at, JSON.stringify(ok));
+    assert.ok(ok.polls >= 1);
+    assert.ok((ok.request_bytes ?? 0) > 0);
+    assert.equal(JSON.stringify(ok).includes('return 1'), false, 'no Lua code in the report');
+    assert.equal(JSON.stringify(ok).includes(r.dirs.stateDir), false, 'no paths in the report');
+
+    // A live holder that never releases: lock_held, no lock or write phase.
+    const lockPath = path.join(r.dirs.stateDir, LOCK_FILE);
+    await fsp.writeFile(lockPath, `${process.pid + 100000}\n`);
+    const blocked = new BridgeClient({
+      stateDir: r.dirs.stateDir,
+      prefsDir: r.dirs.prefsDir,
+      maxResponseKb: 64,
+      pollMs: 5,
+      isPidAlive: () => true,
+      onRequest: (report) => reports.push({ ...report }),
+    });
+    await expectError(blocked.run('return 2', 60), 'lock_held');
+    await fsp.unlink(lockPath);
+    const held = reports[1]!;
+    assert.equal(held.outcome, 'lock_held');
+    assert.equal(held.lock_acquired_at, undefined);
+    assert.equal(held.written_at, undefined);
+    assert.ok(held.finished_at - held.started_at >= 50, 'the wait is inside the report');
+  } finally {
+    await r.close();
+  }
+
+  const late = await rig({ mode: 'late', lateMs: 150 }, { onRequest: (report) => reports.push({ ...report }) });
+  try {
+    await expectError(late.client.run('return 3', 60), 'timeout');
+    const timedOut = reports[2]!;
+    assert.equal(timedOut.outcome, 'timeout');
+    assert.ok(timedOut.written_at !== undefined);
+    assert.equal(timedOut.lua_ok, undefined);
+    await sleep(200); // let the late answer land before the rig's directories go
+  } finally {
+    await late.close();
+  }
+
+  const throwing = await rig({}, {
+    onRequest: () => {
+      throw new Error('observer bug');
+    },
+  });
+  try {
+    const env = await throwing.client.run('return 4', 1000);
+    assert.equal(env.ok, true, 'a throwing observer leaves the result alone');
+    assert.equal(await exists(path.join(throwing.dirs.stateDir, LOCK_FILE)), false, 'and the lock is still released');
+  } finally {
+    await throwing.close();
   }
 });
 
