@@ -387,6 +387,168 @@ return { ok = true, job_id = job_id, status = st, rendering_in_progress = projec
 `;
 }
 
+/** One `markers` target of capture_frame: every marker when both fields are absent. */
+export interface MarkerQuery {
+  color?: MarkerColor | undefined;
+  /** A name substring, matched case-insensitively for ASCII letters, pattern characters literal. */
+  contains?: string | undefined;
+}
+
+function markerQueryLua(q: MarkerQuery): string {
+  return `{ color = ${q.color === undefined ? 'nil' : luaString(q.color)}, contains = ${q.contains === undefined ? 'nil' : luaString(q.contains)} }`;
+}
+
+/**
+ * capture_frame, chunk A (read-only): the timeline's identity, start and frame rate, one marker set
+ * per query, and the requested video items. The marker sets share `markerBudget` entries, spent in
+ * query order; each set's `total` counts every match, listed or not. Names are clipped to 100
+ * bytes at a UTF-8 boundary, since a cut inside a character would reach the JSON encoder as
+ * invalid UTF-8; matching reads the whole name.
+ */
+export function captureInfoSnippet(req: { itemIds: readonly string[]; markerQueries: readonly MarkerQuery[]; markerBudget: number }): string {
+  return `${PRELUDE}${NEED_TIMELINE}local item_ids = ${luaStringList(req.itemIds)}
+local queries = { ${req.markerQueries.map(markerQueryLua).join(', ')} }
+local budget = ${luaInt(req.markerBudget)}
+local start_frame = tl:GetStartFrame()
+local s = tl:GetSettings() or {}
+local function clip(text)
+  text = tostring(text or "")
+  if #text <= 100 then return text end
+  local cut = 100
+  while cut > 0 do
+    local b = text:byte(cut + 1)
+    if b < 0x80 or b >= 0xC0 then break end
+    cut = cut - 1
+  end
+  return text:sub(1, cut) .. "..."
+end
+local raw = tl:GetMarkers() or {}
+local keys = {}
+for k, m in pairs(raw) do
+  if type(k) == "number" and type(m) == "table" then keys[#keys + 1] = k end
+end
+table.sort(keys)
+local marker_sets = {}
+for q = 1, #queries do
+  local color = queries[q].color
+  local needle = queries[q].contains and string.lower(queries[q].contains) or nil
+  local set = { markers = {}, total = 0 }
+  for i = 1, #keys do
+    local k = keys[i]
+    local m = raw[k]
+    if (color == nil or m.color == color) and (needle == nil or string.find(string.lower(tostring(m.name or "")), needle, 1, true)) then
+      set.total = set.total + 1
+      if budget > 0 then
+        budget = budget - 1
+        set.markers[#set.markers + 1] = { offset = k, frame = start_frame + k, color = m.color, name = clip(m.name) }
+      end
+    end
+  end
+  marker_sets[q] = set
+end
+local wanted, remaining = {}, 0
+for i = 1, #item_ids do
+  if not wanted[item_ids[i]] then wanted[item_ids[i]] = true; remaining = remaining + 1 end
+end
+local found = {}
+local track_count = tl:GetTrackCount("video") or 0
+for t = 1, track_count do
+  if remaining == 0 then break end
+  local list = tl:GetItemListInTrack("video", t) or {}
+  for j = 1, #list do
+    local it = list[j]
+    local id = it:GetUniqueId()
+    if wanted[id] and not found[id] then
+      found[id] = { id = id, name = it:GetName(), start = it:GetStart(), ["end"] = it:GetEnd(), track = t }
+      remaining = remaining - 1
+      if remaining == 0 then break end
+    end
+  end
+end
+local items, missing = {}, {}
+for i = 1, #item_ids do
+  if found[item_ids[i]] then items[#items + 1] = found[item_ids[i]] else missing[#missing + 1] = item_ids[i] end
+end
+return { ok = true,
+  timeline = { name = tl:GetName(), unique_id = tl:GetUniqueId(), start_frame = start_frame, end_frame = tl:GetEndFrame(),
+    start_timecode = tl:GetStartTimecode() },
+  frame_rate = s.timelineFrameRate, drop_frame = s.timelineDropFrameTimecode,
+  marker_sets = marker_sets, items = items, missing_items = missing }
+`;
+}
+
+/**
+ * capture_frame, chunk B: on the Color page (the one page whose viewer always shows the timeline,
+ * measured 2026-09-24), seek to each shot's timecode, export the frame to its path and check the
+ * playhead read-back; then put the playhead and the page back, whatever happened. A shot with
+ * timecode "" is the playhead: it seeks back to the position read at the start, because earlier
+ * shots have moved it. Refuses before touching anything when the timeline is not the one chunk A
+ * described, or a render is running.
+ */
+export function captureRunSnippet(req: {
+  timelineId: string;
+  startFrame: number;
+  startTimecode: string;
+  shots: ReadonlyArray<{ path: string; timecode: string }>;
+}): string {
+  return `${PRELUDE}${NEED_TIMELINE}local expected_id = ${luaString(req.timelineId)}
+local expected_start = ${luaInt(req.startFrame)}
+local expected_tc = ${luaString(req.startTimecode)}
+local paths = ${luaStringList(req.shots.map((s) => s.path))}
+local tcs = ${luaStringList(req.shots.map((s) => s.timecode))}
+if tl:GetUniqueId() ~= expected_id or tl:GetStartFrame() ~= expected_start or tl:GetStartTimecode() ~= expected_tc then
+  return { ok = false, error = "the current timeline changed after the frames were worked out; call capture_frame again", changed = true }
+end
+if project:IsRenderingInProgress() then
+  return { ok = false, error = "a render is in progress; wait for it to finish (get_render_status), then call capture_frame again" }
+end
+local was_page = resolve:GetCurrentPage()
+local switched = false
+if was_page ~= "color" then
+  if not resolve:OpenPage("color") then
+    return { ok = false, error = 'OpenPage("color") returned false; open the Color page in Resolve and call capture_frame again', page = was_page }
+  end
+  switched = true
+end
+local okt, was_tc = pcall(function() return tl:GetCurrentTimecode() end)
+if not okt or type(was_tc) ~= "string" or was_tc == "" then was_tc = nil end
+local shots = {}
+for i = 1, #paths do
+  local ok, rec = pcall(function()
+    local want = tcs[i]
+    if want == "" then
+      if was_tc == nil then return { ok = false, error = "the playhead could not be read" } end
+      want = was_tc
+    end
+    if not tl:SetCurrentTimecode(want) then
+      return { ok = false, timecode = want, error = "SetCurrentTimecode returned false" }
+    end
+    local exported = project:ExportCurrentFrameAsStill(paths[i])
+    local readback = tl:GetCurrentTimecode()
+    if not exported then return { ok = false, timecode = want, readback = readback, error = "ExportCurrentFrameAsStill returned false" } end
+    if readback ~= want then
+      return { ok = false, timecode = want, readback = readback,
+        error = "the playhead read back as " .. tostring(readback) .. ", not " .. want .. "; the frame was dropped" }
+    end
+    return { ok = true, timecode = want }
+  end)
+  shots[i] = ok and rec or { ok = false, error = "Lua error: " .. tostring(rec) }
+end
+local tc_restored = false
+if was_tc ~= nil then
+  local ok2, r2 = pcall(function() return tl:SetCurrentTimecode(was_tc) end)
+  tc_restored = ok2 and r2 == true
+end
+local page_restored = not switched
+if switched then
+  local ok3, r3 = pcall(function() return resolve:OpenPage(was_page) end)
+  page_restored = ok3 and r3 == true
+end
+return { ok = true, page = { was = was_page, switched = switched, restored = page_restored },
+  playhead = { was = was_tc, restored = tc_restored }, shots = shots }
+`;
+}
+
 /** Every snippet with representative arguments, for the syntax-check test. */
 export function allSnippetSamples(): Record<string, string> {
   return {
@@ -406,5 +568,19 @@ export function allSnippetSamples(): Record<string, string> {
     render: renderSnippet('H.264 Master', '/Users/x/out dir', 'file "name"'),
     renderNoPreset: renderSnippet(undefined, '/tmp', 'f'),
     renderStatus: renderStatusSnippet('abc-123'),
+    captureInfo: captureInfoSnippet({
+      itemIds: ['id "1"', 'x]==]y'],
+      markerQueries: [{ color: 'Blue' }, { contains: '100% .* "q"\n' }, {}],
+      markerBudget: 40,
+    }),
+    captureRun: captureRunSnippet({
+      timelineId: 'tl "1"',
+      startFrame: 108000,
+      startTimecode: '01:00:00:00',
+      shots: [
+        { path: '/Users/x/state dir/capture-1-0a1b2c3d-1.bmp', timecode: '01:00:08:08' },
+        { path: 'C:/Users/x/"q"]]/capture-1-0a1b2c3d-2.bmp', timecode: '' },
+      ],
+    }),
   };
 }
