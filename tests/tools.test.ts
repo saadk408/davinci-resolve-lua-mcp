@@ -1,8 +1,9 @@
-// The 15 tools through an in-memory MCP client: metadata, result shapes, error mapping and the
+// The 16 tools through an in-memory MCP client: metadata, result shapes, error mapping and the
 // Lua each tool sends (captured by a recording Bridge stub), plus a few end-to-end cases through
 // the real BridgeClient and the fake bridge.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { writeFileSync } from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import { Client } from '@modelcontextprotocol/client';
@@ -16,6 +17,7 @@ import { BridgeClient, BridgeError, START_INSTRUCTION, type Bridge, type BridgeS
 import { createServer, TOOL_NAMES, type ServerDeps } from '../src/server.js';
 import { luaString, type RequestOp } from '../src/lua.js';
 import { BRIDGE_TAG, startFakeBridge } from './helpers/fakeBridge.js';
+import { noiseBmp, solid, writeBmp } from './helpers/bmp.js';
 import { makeTempDirs, type TempDirs } from './helpers/tmp.js';
 
 type Canned = Partial<Envelope> | ((op: RequestOp, opts: RequestOptions) => Partial<Envelope>) | Error;
@@ -87,7 +89,7 @@ function text(r: { content: unknown }): string {
   return first?.text ?? '';
 }
 
-test('tools/list: exactly the 15 tools, each with title, hints and openWorldHint false; instructions present', async () => {
+test('tools/list: exactly the 16 tools, each with title, hints and openWorldHint false; instructions present', async () => {
   const r = await rig();
   try {
     const { tools } = await r.client.listTools();
@@ -104,7 +106,7 @@ test('tools/list: exactly the 15 tools, each with title, hints and openWorldHint
       assert.ok(!/always|you must|never call/i.test(t.description ?? ''), `${t.name} description describes, it does not instruct`);
     }
     const byName = Object.fromEntries(tools.map((t) => [t.name, t.annotations ?? {}]));
-    for (const n of ['resolve_status', 'get_project_info', 'list_projects', 'list_timelines', 'list_media_pool_clips', 'get_timeline_items', 'get_render_status', 'scripting_api_docs']) {
+    for (const n of ['resolve_status', 'get_project_info', 'list_projects', 'list_timelines', 'list_media_pool_clips', 'get_timeline_items', 'get_render_status', 'scripting_api_docs', 'capture_frame']) {
       assert.equal(byName[n]?.readOnlyHint, true, `${n} read-only`);
       assert.equal(byName[n]?.destructiveHint, false);
     }
@@ -118,6 +120,8 @@ test('tools/list: exactly the 15 tools, each with title, hints and openWorldHint
     assert.match(instructions, /scripting_api_docs/);
     assert.match(instructions, /confirm=true/);
     assert.match(instructions, /get_render_status/);
+    assert.match(instructions, /capture_frame shows what the timeline looks like/);
+    assert.match(instructions, /which capture_frame reports as offset/);
     assert.equal(r.client.getServerVersion()?.name, 'davinci-resolve-lua-mcp');
   } finally {
     await r.close();
@@ -489,6 +493,356 @@ test('onToolError: a non-BridgeError throw reaches it with the tool name, a Brid
     const second = await r.client.callTool({ name: 'list_timelines', arguments: {} });
     assert.equal(second.isError, true, 'a throwing hook does not change the result');
     assert.equal(errors[1]?.[1], 'list_timelines');
+  } finally {
+    await r.close();
+  }
+});
+
+// ---- capture_frame ------------------------------------------------------------------------------
+
+const TL_INFO = { name: 'Timeline 1', unique_id: 'tl-1', start_frame: 108000, end_frame: 108497, start_timecode: '01:00:00:00' };
+
+/** Chunk A's reply for a 29.97 non-drop-frame timeline starting at 01:00:00:00 (empty lists as Lua sends them). */
+function infoReply(over: Record<string, unknown> = {}): Partial<Envelope> {
+  return { result: { ok: true, timeline: TL_INFO, frame_rate: 29.97, drop_frame: '0', marker_sets: {}, items: {}, missing_items: {}, ...over } };
+}
+
+/** The strings of `local <name> = { "a", "b" }` in a captured chunk (no escapes in these tests). */
+function luaList(code: string, name: string): string[] {
+  const m = new RegExp(`^local ${name} = \\{ (.*) \\}$`, 'm').exec(code);
+  assert.ok(m, `no ${name} list in the chunk`);
+  return [...(m[1] ?? '').matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((x) => x[1] ?? '');
+}
+
+/**
+ * Chunk B's reply: writes a BMP at every path the chunk names (a small solid frame unless `bmp`
+ * says otherwise; null writes nothing) and answers one shot record per path, the playhead shot at
+ * 01:00:02:00.
+ */
+function runReply(o: {
+  bmp?: (i: number) => Buffer | null;
+  shot?: (i: number, tc: string) => Record<string, unknown>;
+  page?: Record<string, unknown>;
+  playhead?: Record<string, unknown>;
+} = {}): Canned {
+  return (_op, opts) => {
+    const code = opts.code ?? '';
+    const tcs = luaList(code, 'tcs');
+    const shots = luaList(code, 'paths').map((p, i) => {
+      const img = o.bmp ? o.bmp(i) : writeBmp(solid(64, 36, [200, 100, 50]));
+      if (img) writeFileSync(p, img);
+      const tc = tcs[i] === '' ? '01:00:02:00' : (tcs[i] ?? '');
+      return o.shot ? o.shot(i, tc) : { ok: true, timecode: tc };
+    });
+    return {
+      result: {
+        ok: true,
+        page: o.page ?? { was: 'edit', switched: true, restored: true },
+        playhead: o.playhead ?? { was: '01:00:02:00', restored: true },
+        shots,
+      },
+    };
+  };
+}
+
+type Block = { type: string; text?: string; data?: string; mimeType?: string };
+
+async function captureFiles(dir: string): Promise<string[]> {
+  return (await fsp.readdir(dir)).filter((n) => n.startsWith('capture-'));
+}
+
+test('capture_frame: targets become frames and timecodes, images follow frames[] in order, and no BMP is left', async () => {
+  const stub = new StubBridge().reply(infoReply({ items: [{ id: 'item-1', name: 'Shot A', start: 108000, end: 108497, track: 1 }] }), runReply());
+  const r = await rig(stub);
+  try {
+    const res = await r.client.callTool({
+      name: 'capture_frame',
+      arguments: {
+        targets: [{ type: 'frame', frame: 108100 }, { type: 'item', item_id: 'item-1', at: 'first' }, { type: 'playhead' }, { type: 'timecode', timecode: '01:00:08;08' }],
+      },
+    });
+    assert.ok(!res.isError, text(res));
+    const out = structured(res);
+    const frames = out['frames'] as Array<Record<string, unknown>>;
+    assert.deepEqual(
+      frames.map((f) => [f['index'], f['frame'], f['offset'], f['timecode'], f['label'], f['width'], f['height']]),
+      [
+        [1, 108100, 100, '01:00:03:10', 'frame 108100', 64, 36],
+        [2, 108000, 0, '01:00:00:00', 'first frame of item "Shot A"', 64, 36],
+        [3, 108060, 60, '01:00:02:00', 'playhead', 64, 36],
+        [4, 108248, 248, '01:00:08:08', 'timecode 01:00:08:08', 64, 36],
+      ],
+    );
+    const content = res.content as Block[];
+    assert.deepEqual(content.map((c) => c.type), ['text', 'text', 'image', 'text', 'image', 'text', 'image', 'text', 'image']);
+    assert.equal(JSON.parse(content[0]?.text ?? '')['timeline'], 'Timeline 1', 'the first block is the summary JSON');
+    assert.equal(content[1]?.text, 'Frame 1: 01:00:03:10 (frame 108100): frame 108100');
+    assert.equal(content[5]?.text, 'Frame 3: 01:00:02:00 (frame 108060): playhead');
+    content
+      .filter((c) => c.type === 'image')
+      .forEach((c, i) => {
+        assert.equal(c.mimeType, 'image/jpeg');
+        const jpeg = Buffer.from(c.data ?? '', 'base64');
+        assert.deepEqual([...jpeg.subarray(0, 2)], [0xff, 0xd8], `image ${i + 1} is a JPEG`);
+        assert.equal(jpeg.length, frames[i]?.['bytes']);
+      });
+    assert.deepEqual([out['frame_rate'], out['drop_frame'], out['start_frame'], out['skipped_total']], [29.97, false, 108000, 0]);
+    assert.deepEqual(out['page'], { was: 'edit', switched: true, restored: true });
+    assert.deepEqual(out['failed'], []);
+    assert.equal(out['warnings'], undefined);
+
+    const [a, b] = stub.calls;
+    assert.match(a?.opts.code ?? '', /^local item_ids = \{ "item-1" \}$/m);
+    assert.match(a?.opts.code ?? '', /^local queries = \{  \}$/m);
+    assert.match(a?.opts.code ?? '', /^local budget = 40$/m);
+    assert.deepEqual(luaList(b?.opts.code ?? '', 'tcs'), ['01:00:03:10', '01:00:00:00', '', '01:00:08:08']);
+    assert.match(b?.opts.code ?? '', /^local expected_id = "tl-1"$/m);
+    assert.equal(b?.opts.timeoutMs, 60_000, 'chunk B waits at least 60 s, as renders do');
+    luaList(b?.opts.code ?? '', 'paths').forEach((p, i) => assert.match(p, new RegExp(`/capture-${process.pid}-[0-9a-f]{8}-${i + 1}\\.bmp$`)));
+    assert.deepEqual(await captureFiles(r.dirs.stateDir), []);
+  } finally {
+    await r.close();
+  }
+});
+
+test('capture_frame: each markers target reads its own set; a shared frame merges, left-out matches are counted', async () => {
+  const blue = [10, 20, 30].map((o, k) => ({ offset: o, frame: 108000 + o, color: 'Blue', name: `B${k + 1}` }));
+  const red = [
+    { offset: 20, frame: 108020, color: 'Red', name: 'R1' },
+    { offset: 300, frame: 108300, color: 'Red', name: '' },
+  ];
+  const stub = new StubBridge().reply(infoReply({ marker_sets: [{ markers: blue, total: 3 }, { markers: red, total: 5 }] }), runReply());
+  const r = await rig(stub);
+  try {
+    const res = await r.client.callTool({ name: 'capture_frame', arguments: { targets: [{ type: 'markers', color: 'Blue' }, { type: 'markers', color: 'Red', contains: 'r' }] } });
+    const out = structured(res);
+    const frames = out['frames'] as Array<Record<string, unknown>>;
+    assert.deepEqual(
+      frames.map((f) => [f['frame'], f['label']]),
+      [
+        [108010, 'marker "B1" (Blue)'],
+        [108020, 'marker "B2" (Blue); marker "R1" (Red)'],
+        [108030, 'marker "B3" (Blue)'],
+        [108300, 'marker at offset 300 (Red)'],
+      ],
+    );
+    assert.equal((frames[1]?.['targets'] as unknown[]).length, 2);
+    assert.equal(out['skipped_total'], 3, 'the Red set matched 5 and listed 2');
+    assert.match(stub.calls[0]?.opts.code ?? '', /^local queries = \{ \{ color = "Blue", contains = nil \}, \{ color = "Red", contains = "r" \} \}$/m);
+  } finally {
+    await r.close();
+  }
+});
+
+test('capture_frame: 8 targets expanding to dozens of markers capture 8, list 32 and count the rest', async () => {
+  const markers = Array.from({ length: 40 }, (_, k) => ({ offset: k, frame: 108000 + k, color: 'Blue', name: `m${k}` }));
+  const sets = [{ markers, total: 60 }, ...Array.from({ length: 7 }, () => ({ markers: {}, total: 5 }))];
+  const stub = new StubBridge().reply(infoReply({ marker_sets: sets }), runReply());
+  const r = await rig(stub);
+  try {
+    const res = await r.client.callTool({ name: 'capture_frame', arguments: { targets: Array.from({ length: 8 }, () => ({ type: 'markers' })) } });
+    const out = structured(res);
+    assert.equal((out['frames'] as unknown[]).length, 8);
+    assert.equal((res.content as Block[]).filter((c) => c.type === 'image').length, 8);
+    assert.equal((out['skipped'] as unknown[]).length, 32);
+    assert.equal(out['skipped_total'], 32 + 20 + 7 * 5);
+    assert.deepEqual(out['failed'], [], 'sets whose matches were all left out are not failures');
+    assert.equal(luaList(stub.calls[1]?.opts.code ?? '', 'paths').length, 8);
+  } finally {
+    await r.close();
+  }
+});
+
+test('capture_frame: an unknown item id fails after the timeline read, before anything moves', async () => {
+  const stub = new StubBridge().reply(infoReply({ missing_items: ['nope "x"'] }));
+  const r = await rig(stub);
+  try {
+    const res = await r.client.callTool({ name: 'capture_frame', arguments: { targets: [{ type: 'cut', item_id: 'nope "x"', edge: 'out' }] } });
+    assert.equal(res.isError, true);
+    assert.equal(text(res), 'no video item with id "nope \\"x\\"" on the current timeline; item ids come from get_timeline_items (video tracks)');
+    assert.deepEqual(structured(res)['missing_items'], ['nope "x"']);
+    assert.equal(stub.calls.length, 1);
+  } finally {
+    await r.close();
+  }
+});
+
+test('capture_frame: a ":" timecode on a drop-frame timeline, a label drop-frame skips, frames outside the timeline', async () => {
+  const df = { name: 'DF', unique_id: 'df-1', start_frame: 107892, end_frame: 108392, start_timecode: '01:00:00;00' };
+  const stub = new StubBridge().reply(infoReply({ timeline: df, drop_frame: '1' }), runReply());
+  const r = await rig(stub);
+  try {
+    const res = await r.client.callTool({
+      name: 'capture_frame',
+      arguments: { targets: [{ type: 'timecode', timecode: '01:00:10:00' }, { type: 'timecode', timecode: '01:01:00;00' }, { type: 'frame', frame: 1 }, { type: 'frame', frame: 108392 }] },
+    });
+    const out = structured(res);
+    assert.deepEqual((out['frames'] as Array<Record<string, unknown>>).map((f) => [f['frame'], f['timecode'], f['offset']]), [[108192, '01:00:10;00', 300]]);
+    assert.equal(out['drop_frame'], true);
+    assert.deepEqual(luaList(stub.calls[1]?.opts.code ?? '', 'tcs'), ['01:00:10;00']);
+    assert.deepEqual(
+      (out['failed'] as Array<Record<string, unknown>>).map((f) => [f['label'], f['error']]),
+      [
+        ['timecode 01:01:00;00', 'timecode "01:01:00;00" does not exist in drop-frame timecode; the next frame is 01:01:00;02'],
+        ['frame 1', 'frame 1 is outside the timeline (107892-108391)'],
+        ['frame 108392', 'frame 108392 is outside the timeline (107892-108391)'],
+      ],
+    );
+  } finally {
+    await r.close();
+  }
+});
+
+test('capture_frame: a read-back mismatch and a missing file fail their frames; a failed restore leads with a warning', async () => {
+  const stub = new StubBridge().reply(
+    infoReply(),
+    runReply({
+      bmp: (i) => (i === 2 ? null : writeBmp(solid(64, 36, [1, 2, 3]))),
+      shot: (i, tc) => (i === 1 ? { ok: false, timecode: tc, readback: '23:59:59:29', error: `the playhead read back as 23:59:59:29, not ${tc}; the frame was dropped` } : { ok: true, timecode: tc }),
+      page: { was: 'fusion', switched: true, restored: false },
+      playhead: { was: '01:00:02:00', restored: false, now: '01:00:00:03' },
+    }),
+  );
+  const r = await rig(stub);
+  try {
+    const res = await r.client.callTool({ name: 'capture_frame', arguments: { targets: [108001, 108002, 108003].map((frame) => ({ type: 'frame', frame })) } });
+    assert.ok(!res.isError);
+    const out = structured(res);
+    assert.deepEqual((out['frames'] as Array<Record<string, unknown>>).map((f) => [f['index'], f['frame']]), [[1, 108001]]);
+    assert.deepEqual(
+      (out['failed'] as Array<Record<string, unknown>>).map((f) => [f['frame'], f['timecode'], f['error']]),
+      [
+        [108002, '01:00:00:02', 'the playhead read back as 23:59:59:29, not 01:00:00:02; the frame was dropped'],
+        [108003, '01:00:00:03', 'Resolve reported the export, but the file is not there'],
+      ],
+    );
+    const warning = 'Resolve could not be put back on the fusion page and is on the Color page; the playhead could not be put back to 01:00:02:00; it is at 01:00:00:03';
+    assert.ok(text(res).startsWith(`Warning: ${warning}.\n{`), text(res).slice(0, 200));
+    assert.deepEqual(out['warnings'], [
+      'Resolve could not be put back on the fusion page and is on the Color page',
+      'the playhead could not be put back to 01:00:02:00; it is at 01:00:00:03',
+    ]);
+    assert.deepEqual(await captureFiles(r.dirs.stateDir), []);
+  } finally {
+    await r.close();
+  }
+});
+
+test('capture_frame: a playhead at the end of the timeline is labelled so, and the warning says why it moved', async () => {
+  // Measured 2026-09-24: after an insert the playhead can sit at the end frame (exclusive); the
+  // Color page may leave it there, and no seek goes back to it once another frame is captured.
+  const stub = new StubBridge().reply(
+    infoReply(),
+    runReply({
+      shot: (i, tc) => ({ ok: true, timecode: i === 0 ? '01:00:16:17' : tc }),
+      playhead: { was: '01:00:16:17', restored: false, now: '01:00:16:16' },
+    }),
+  );
+  const r = await rig(stub);
+  try {
+    const res = await r.client.callTool({ name: 'capture_frame', arguments: { targets: [{ type: 'playhead' }, { type: 'frame', frame: 108001 }] } });
+    const out = structured(res);
+    const [end] = out['frames'] as Array<Record<string, unknown>>;
+    assert.deepEqual([end?.['label'], end?.['frame'], end?.['offset']], ['playhead (the end of the timeline, after its last frame)', 108497, 497]);
+    assert.deepEqual(out['warnings'], [
+      'the playhead could not be put back to 01:00:16:17 (the end of the timeline, after its last frame, where neither the Color page nor SetCurrentTimecode goes); it is at 01:00:16:16',
+    ]);
+  } finally {
+    await r.close();
+  }
+});
+
+test('capture_frame: no frame captured is an isError result that still reports the restores', async () => {
+  const stub = new StubBridge().reply(infoReply(), runReply({ shot: (_i, tc) => ({ ok: false, timecode: tc, error: 'SetCurrentTimecode returned false' }) }));
+  const r = await rig(stub);
+  try {
+    const res = await r.client.callTool({ name: 'capture_frame', arguments: { targets: [{ type: 'frame', frame: 108001 }] } });
+    assert.equal(res.isError, true);
+    assert.equal(text(res), 'no frame could be captured (see failed)');
+    assert.equal((structured(res)['failed'] as Array<Record<string, unknown>>)[0]?.['error'], 'SetCurrentTimecode returned false');
+    assert.deepEqual(structured(res)['page'], { was: 'edit', switched: true, restored: true });
+    assert.deepEqual(await captureFiles(r.dirs.stateDir), []);
+  } finally {
+    await r.close();
+  }
+});
+
+test('capture_frame: nothing to capture and a malformed timeline read are isError results after one bridge call', async () => {
+  const stub = new StubBridge().reply(infoReply({ marker_sets: [{ markers: {}, total: 0 }] }), { result: { ok: true, surprise: 1 } });
+  const r = await rig(stub);
+  try {
+    const none = await r.client.callTool({ name: 'capture_frame', arguments: { targets: [{ type: 'markers', color: 'Cream' }] } });
+    assert.equal(none.isError, true);
+    assert.match(text(none), /^nothing to capture/);
+    assert.deepEqual((structured(none)['failed'] as Array<Record<string, unknown>>).map((f) => [f['label'], f['error']]), [['markers (Cream)', 'no marker matches']]);
+    const odd = await r.client.callTool({ name: 'capture_frame', arguments: {} });
+    assert.equal(odd.isError, true);
+    assert.equal(text(odd), 'the bridge answered the timeline read with an unexpected shape (no timeline record); this is a server bug');
+    assert.equal(stub.calls.length, 2, 'one call each, no capture run');
+  } finally {
+    await r.close();
+  }
+});
+
+test('capture_frame: hostile strings reach Lua only as escaped literals; invalid input never reaches the bridge', async () => {
+  const id = 'a"b\n]==]%.*';
+  const contains = '%.* "q"\n]==]';
+  const stub = new StubBridge().reply(infoReply({ items: [{ id, name: 'W', start: 108000, end: 108010, track: 1 }], marker_sets: [{ markers: {}, total: 0 }] }), runReply());
+  const r = await rig(stub);
+  try {
+    const res = await r.client.callTool({ name: 'capture_frame', arguments: { targets: [{ type: 'item', item_id: id }, { type: 'markers', contains }] } });
+    assert.ok(!res.isError, text(res));
+    const code = stub.calls[0]?.opts.code ?? '';
+    assert.ok(code.includes(`local item_ids = { ${luaString(id)} }`));
+    assert.ok(code.includes(`contains = ${luaString(contains)} }`));
+    assert.ok(!code.includes(id) && !code.includes(contains), 'never raw');
+
+    for (const args of [
+      { targets: [] },
+      { targets: Array.from({ length: 9 }, () => ({ type: 'playhead' })) },
+      { targets: [{ type: 'timecode', timecode: '1:00:00:00' }] },
+      { targets: [{ type: 'markers', contains: '' }] },
+      { targets: [{ type: 'frame', frame: -5 }] },
+      { max_edge: 100 },
+      { max_edge: 4000 },
+    ]) {
+      const bad = await r.client.callTool({ name: 'capture_frame', arguments: args });
+      assert.equal(bad.isError, true, JSON.stringify(args));
+    }
+    assert.equal(stub.calls.length, 2, 'only the valid call reached the bridge');
+  } finally {
+    await r.close();
+  }
+});
+
+test('capture_frame: eight noisy 1080p frames fit the result budget', async () => {
+  const stub = new StubBridge().reply(infoReply(), runReply({ bmp: (i) => noiseBmp(1920, 1080, i + 1) }));
+  const r = await rig(stub);
+  try {
+    const res = await r.client.callTool({ name: 'capture_frame', arguments: { targets: Array.from({ length: 8 }, (_, i) => ({ type: 'frame', frame: 108000 + i * 10 })) } });
+    const frames = structured(res)['frames'] as Array<Record<string, unknown>>;
+    assert.equal(frames.length, 8);
+    const base64 = (res.content as Block[]).filter((c) => c.type === 'image').reduce((n, c) => n + (c.data ?? '').length, 0);
+    assert.ok(base64 <= 800_000, `${base64} base64 characters of images`);
+    assert.ok(JSON.stringify(res).length < 1_000_000, 'the whole result stays under Claude Desktop’s ~1 MB');
+    for (const f of frames) assert.ok((f['bytes'] as number) <= 75_000 || f['over_budget'] === true, JSON.stringify(f));
+  } finally {
+    await r.close();
+  }
+});
+
+test('capture_frame: removes capture files a gone server left, keeps its own fresh ones, and captures the playhead by default', async () => {
+  const stub = new StubBridge().reply(infoReply(), runReply());
+  const r = await rig(stub);
+  const dead = 'capture-2147483646-0a1b2c3d-1.bmp'; // above every platform's pid range
+  const mine = `capture-${process.pid}-0a1b2c3d-99.bmp`;
+  try {
+    await fsp.writeFile(path.join(r.dirs.stateDir, dead), 'x');
+    await fsp.writeFile(path.join(r.dirs.stateDir, mine), 'x');
+    const res = await r.client.callTool({ name: 'capture_frame', arguments: {} });
+    assert.deepEqual((structured(res)['frames'] as Array<Record<string, unknown>>).map((f) => f['label']), ['playhead']);
+    assert.deepEqual(luaList(stub.calls[1]?.opts.code ?? '', 'tcs'), ['']);
+    assert.deepEqual(await captureFiles(r.dirs.stateDir), [mine]);
   } finally {
     await r.close();
   }

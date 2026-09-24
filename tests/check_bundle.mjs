@@ -1,5 +1,6 @@
 // Gate for the packed bundle, on macOS and Windows alike: the archive holds exactly the shipped
-// files, stays under 2 MB, and the unpacked copy answers tools/list with the 15 tools and
+// files, stays under 2 MB, its server carries the jpeg-js licence notices and not the jpeg-js
+// decoder, and the unpacked copy answers tools/list with the 16 tools and
 // resolve_status with this platform over stdio (under temp dirs, with the self-install off, so
 // nothing outside the temp dir is touched). The unpack goes through the pinned mcpb CLI's own
 // `unpack` (never npx), so the gate needs no zipinfo, unzip, stat or mktemp.
@@ -14,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 const REQUIRED = ['manifest.json', 'package.json', 'server/index.js', 'bridge/resolve_mcp_bridge.lua', 'scripts/claude_diag.lua', 'icon.png'];
 const OPTIONAL = ['README.md', 'LICENSE'];
 const SIZE_LIMIT = 2 * 1024 * 1024;
-const TOOL_COUNT = 15;
+const TOOL_COUNT = 16;
 const PROBE_TIMEOUT_MS = 30_000;
 
 const bundle = path.resolve(process.argv[2] ?? 'dist/davinci-resolve-lua-mcp.mcpb');
@@ -116,6 +117,18 @@ try {
   for (const f of ['server/index.js', 'manifest.json', 'package.json']) {
     const p = path.join(unpacked, f);
     if (fs.existsSync(p) && /sentry/i.test(fs.readFileSync(p, 'utf8'))) bad(`the word sentry appears in the bundle's ${f} (the private build's code must not enter the public bundle)`);
+  }
+
+  // 2c. capture_frame's JPEG encoder (jpeg-js, BSD-3-Clause) is inlined into server/index.js, so its
+  // two copyright notices ship with it (src/image.ts carries them as a /*! */ legal comment, the
+  // only kind esbuild keeps); the decoder, which the server never uses, stays out.
+  const serverIndex = path.join(unpacked, 'server', 'index.js');
+  if (fs.existsSync(serverIndex)) {
+    const js = fs.readFileSync(serverIndex, 'utf8');
+    for (const line of ['Copyright (c) 2014, Eugene Ware', 'Copyright (c) 2008, Adobe Systems Incorporated']) {
+      if (!js.includes(line)) bad(`server/index.js lacks the jpeg-js licence notice "${line}"`);
+    }
+    if (js.includes('maxResolutionInMP')) bad("server/index.js contains the jpeg-js decoder (import 'jpeg-js/lib/encoder.js', never the package index)");
   }
 
   // 3. Probe: initialize, initialized, tools/list, resolve_status over stdio. Empty temp dirs stand in

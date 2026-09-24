@@ -13,7 +13,7 @@ DaVinci Resolve 21.1 moved Python scripting and the external scripting API to th
 
 ## Features
 
-- **15 purpose-built tools**: project overview, project and timeline lists, Media Pool clips, timeline items, markers, timeline and project switching, rendering with status polling, and a search over Blackmagic's shipped scripting reference.
+- **16 purpose-built tools**: project overview, project and timeline lists, Media Pool clips, timeline items, markers, timeline and project switching, rendering with status polling, frame capture (Claude sees the timeline's picture as JPEG images), and a search over Blackmagic's shipped scripting reference.
 - **`run_lua` for everything else**: any Lua 5.1 chunk runs inside Resolve with the live `resolve` object and returns JSON, captured `print` output and errors.
 - **One `.mcpb` bundle**: install it in Claude Desktop, and the server copies its two Lua scripts into Resolve's user scripts folder on first launch.
 - **No network**: the server and the script talk through a request file and Fusion's preferences. There are no sockets, no listeners and no telemetry.
@@ -70,6 +70,8 @@ To stop it, ask Claude to stop the bridge (`stop_bridge`), or quit Resolve. Clic
 Give me an overview of the open Resolve project.
 List the clips in the root bin with their durations and frame rates.
 What is on video track 1 of the current timeline?
+Show me the frame under the playhead.
+Show me the frame at each blue marker and tell me which one has the title card.
 Add a blue marker at frame 240 named "fix colour".
 Delete all the red markers on this timeline.
 Render the current timeline to ~/Movies/out as fix-v2 and tell me when it finishes.
@@ -98,8 +100,11 @@ https://github.com/user-attachments/assets/febdf2b9-8e0d-4fbf-8462-0d6ecd98c829
 | `get_render_status` | Status, completion percentage and error of one render job, plus whether Resolve is rendering | `job_id` | read-only |
 | `stop_bridge` | Asks the bridge to exit cleanly; relaunch it from `Workspace > Scripts` afterwards | none | writes |
 | `scripting_api_docs` | Searches Blackmagic's shipped scripting reference (`.pyi` signatures, README sections, CHANGELOG) with file and line; flags deprecated and unsupported calls | `query`; `limit` 1..10 (default 5) | read-only |
+| `capture_frame` | Exports frames of the current timeline as Resolve renders them (grade, titles, effects and upper tracks included) and returns them as JPEG images, with each frame's number, offset and timecode | `targets`, 1..8 (default the playhead): `playhead`, `frame`, `timecode`, `markers` (optional `color`, `contains`), `item` (`item_id`, `at` first, middle or last), `cut` (`item_id`, `edge` in or out); `max_edge` 160..1920 (default 960) | read-only |
 
-Every tool declares its access hints to the client. `delete_markers` refuses without `confirm: true`, and Claude is told to ask you first; `run_lua` takes no confirmation and is flagged destructive so the client can warn. Results are JSON with a matching `structuredContent`; the paginated tools (`list_media_pool_clips`, `get_timeline_items`) report `total`, `offset`, `limit` and `truncated`, and every failure names the next step instead of throwing.
+Every tool declares its access hints to the client. `delete_markers` refuses without `confirm: true`, and Claude is told to ask you first; `run_lua` takes no confirmation and is flagged destructive so the client can warn. Results are JSON with a matching `structuredContent` (`capture_frame` adds a label and an image per frame); the paginated tools (`list_media_pool_clips`, `get_timeline_items`) report `total`, `offset`, `limit` and `truncated`, and every failure names the next step instead of throwing.
+
+`capture_frame` works on the Color page, the one page whose viewer always shows the timeline rather than a source clip, and moves the playhead from frame to frame: it switches pages and puts the page and the playhead back afterwards. A playhead at the very end of the timeline, one past its last frame (where adding a clip leaves it), cannot be put back, because Resolve never seeks there; the result then says where the playhead is. Up to eight frames come back per call, downscaled so the whole result stays under about 800 KB; frames that did not fit are listed in `skipped`.
 
 Marker colours: Blue, Cyan, Green, Yellow, Red, Pink, Purple, Fuchsia, Rose, Lavender, Sky, Mint, Lemon, Sand, Cocoa, Cream.
 
@@ -141,7 +146,7 @@ Claude Desktop shows these five settings when you install the extension. Keep th
 |---|---|---|
 | Resolve user scripts folder | platform default | Where the two Lua scripts are copied so they appear under `Workspace > Scripts`. The only Resolve folder ever written, and never created: launch Resolve once so it exists. |
 | Install the bridge scripts automatically | on | Copy (and update) `resolve_mcp_bridge.lua` and `claude_diag.lua` into the scripts folder when the server starts. Off means you copy them by hand. |
-| State directory | platform default | Where the request file, the lock and the server log live. On Windows prefer an ASCII-only path. |
+| State directory | platform default | Where the request file, the lock, the server log and the frames of a capture in progress live. On Windows prefer an ASCII-only path. |
 | Default tool timeout (seconds) | 30 | How long a tool waits for the bridge before giving up, 1 to 300. `run_lua` can override it per call. |
 | Resolve Fusion prefs folder | platform default | The folder holding `<profile>/Fusion.prefs`, which the bridge answers through; the newest profile file is read. Set it only if `resolve_status` says `prefs_missing`. |
 
@@ -166,7 +171,7 @@ The settings map onto `RLB_SCRIPTS_DIR`, `RLB_AUTO_INSTALL`, `RLB_STATE_DIR`, `R
 |---|---|---|
 | `RLB_SCRIPTS_DIR` | the scripts folder | Where the two Lua files go. |
 | `RLB_AUTO_INSTALL` | `true` | Self-install the two Lua files on start. |
-| `RLB_STATE_DIR` | the state directory | Holds `next.lua`, `next.lua.tmp`, `lock` and `server.log`. `~` and `${HOME}` are expanded; on Windows the server spells the path with forward slashes. |
+| `RLB_STATE_DIR` | the state directory | Holds `next.lua`, `next.lua.tmp`, `lock`, `server.log` and, while `capture_frame` runs, its `capture-*.bmp` frames (deleted when the call ends). `~` and `${HOME}` are expanded; on Windows the server spells the path with forward slashes. |
 | `RLB_DEFAULT_TIMEOUT_S` | `30` | 1..300 seconds. |
 | `RLB_MAX_RESPONSE_KB` | `64` | Cap on a response's JSON, 1..192 KB. |
 | `RLB_LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error`. |
@@ -231,9 +236,9 @@ $bytes = [byte[]]::new($hex.Length / 2); for ($i = 0; $i -lt $bytes.Length; $i++
 
 The extension runs entirely on your machine and sends nothing anywhere. The full policy is [PRIVACY.md](https://github.com/saadk408/davinci-resolve-lua-mcp/blob/main/PRIVACY.md); in short:
 
-- **Collection.** It processes what Claude sends it (Lua code, marker text, names, paths) and what Resolve answers (project, timeline, clip and marker metadata, media paths). No accounts, no credentials, no telemetry, analytics or crash reporting.
-- **Use and storage.** That data lives only in the request file (one call, then deleted), the last answer in `Fusion.prefs`, the server log (ids, timings, paths and error messages; never Lua code, arguments or results) and Claude Desktop's copy of that log.
-- **Third-party sharing.** None by the extension. Claude Desktop sends tool inputs and results to Anthropic as part of your conversation, under Anthropic's privacy policy; GitHub serves the download.
+- **Collection.** It processes what Claude sends it (Lua code, marker text, names, paths) and what Resolve answers (project, timeline, clip and marker metadata, media paths, and the frames `capture_frame` exports). No accounts, no credentials, no telemetry, analytics or crash reporting.
+- **Use and storage.** That data lives only in the request file (one call, then deleted), full-resolution frames in the state directory while a capture runs (deleted when it ends), the last answer in `Fusion.prefs`, the server log (ids, timings, paths and error messages; never Lua code, arguments or results) and Claude Desktop's copy of that log.
+- **Third-party sharing.** None by the extension. Claude Desktop sends tool inputs and results, captured frames included, to Anthropic as part of your conversation, under Anthropic's privacy policy; GitHub serves the download.
 - **Retention.** Until the next call or bridge launch overwrites the answer, until the log passes 5 MB, and otherwise until you delete the files as described under [Uninstall](#uninstall).
 - **Contact.** Questions: [open an issue](https://github.com/saadk408/davinci-resolve-lua-mcp/issues). Security problems: the repository's Security tab, as [SECURITY.md](https://github.com/saadk408/davinci-resolve-lua-mcp/blob/main/SECURITY.md) describes.
 
@@ -271,7 +276,7 @@ make install   # make bundle, then open the .mcpb so Claude Desktop shows its di
 | `make install` | Bundle, then `open` the `.mcpb`. The install click is yours. |
 | `make sign` | Optional self-signed `mcpb sign` plus `mcpb verify`; `cert.pem` and `key.pem` stay out of git and the bundle. |
 | `make dev-register` / `make dev-unregister` | Add or remove a `davinci-resolve-lua-mcp-dev` entry in `~/Library/Application Support/Claude/claude_desktop_config.json` that runs `server/index.js` from this checkout with the current Node. The file is backed up first, other keys are kept, mode 0600 is preserved. `scripts/dev-register.mjs` takes `--config`, `--name`, `--server` (another checkout's `server/index.js`, for example a git worktree's), `--env` (a `KEY=VALUE` file whose `RLB_*` lines become the entry's environment; default `.env`), `--dry-run` and `--remove`. |
-| `make smoke SMOKE_PROJECT="<name>"` | Build, then drive the real tools against the live bridge exactly as Claude Desktop does: status, latency, prints and errors, project and timeline listings, a scratch timeline with markers, pagination, truncation, a render and its cleanup. `SMOKE_FLAGS=--no-render` skips the render. Output goes to `.out/smoke.log`. |
+| `make smoke SMOKE_PROJECT="<name>"` | Build, then drive the real tools against the live bridge exactly as Claude Desktop does: status, latency, prints and errors, project and timeline listings, a scratch timeline with markers, frame captures (from its page and from Fairlight, one with the playhead at the timeline's end), pagination, truncation, a render and its cleanup. `SMOKE_FLAGS=--no-render` skips the render. Output goes to `.out/smoke.log`. |
 | `make stop` | Ask the running bridge to exit (`stop_bridge`); relaunch it from the Scripts menu afterwards. |
 | `make uninstall-bridge` | Remove exactly `resolve_mcp_bridge.lua` and `claude_diag.lua` from the scripts folder (`RLB_SCRIPTS_DIR` overrides the default). |
 | `make lint-lua` | Check that the generated API types match the installed `.pyi`, then run `lua-language-server --check` over the workspace, failing on any diagnostic under `bridge/` or `tests/`. |
@@ -283,12 +288,12 @@ The developer loop: `make dev-register` once, then `make build` and restart Clau
 Releases: pushing a `vX.Y.Z` tag runs `.github/workflows/release.yml`, which runs the Node gates and `make bundle` on the tagged commit, attests the bundle's build provenance, then publishes an immutable GitHub Release with the bundle attached and its SHA-256 in the notes; an annotated tag's message becomes the notes' introduction. A second job publishes the release to the [MCP Registry](https://registry.modelcontextprotocol.io) as `io.github.saadk408/davinci-resolve-lua-mcp`, with the hash of the file the release serves. Verify a downloaded bundle with `gh attestation verify davinci-resolve-lua-mcp.mcpb -R saadk408/davinci-resolve-lua-mcp`. The tests workflow also runs the Node gates and the bundle gate on a Windows runner.
 
 > [!NOTE]
-> `make smoke` creates and deletes a timeline named `bridge-smoke`, adds and deletes markers on it, and sets the project's render target directory and file name. `SMOKE_PROJECT` must be the name of the project that is open in Resolve, and it should be a scratch project, never a real edit. The run refuses to proceed when the names differ.
+> `make smoke` creates and deletes a timeline named `bridge-smoke`, adds and deletes markers on it, captures frames of it (switching pages and moving its playhead), and sets the project's render target directory and file name. `SMOKE_PROJECT` must be the name of the project that is open in Resolve, and it should be a scratch project, never a real edit. The run refuses to proceed when the names differ.
 
 Layout:
 
 - `bridge/resolve_mcp_bridge.lua`: the in-Resolve loop, one dependency-free file under 600 lines.
-- `src/`: the TypeScript server. `server.ts` holds the 15 tools, `lua.ts` every Lua snippet and the one string-escaping helper, `protocol.ts` the request slot and lock, `prefs.ts` the `Fusion.prefs` reader, `bridgeInstall.ts` the self-install.
+- `src/`: the TypeScript server. `server.ts` holds the 16 tools, `lua.ts` every Lua snippet and the one string-escaping helper, `capture.ts`, `image.ts` and `timecode.ts` the frame capture (targets, BMP to JPEG, timecode arithmetic), `protocol.ts` the request slot and lock, `prefs.ts` the `Fusion.prefs` reader, `bridgeInstall.ts` the self-install.
 - `scripts/claude_diag.lua`: the sandbox diagnostic, also shipped in the bundle.
 - `tests/`: the Node suite; `tests/lua/`: the `fuscript` checks.
 - `docs/`: the Windows measurement checklist (`windows.md`) and the README's screenshots (`images/`).
@@ -299,5 +304,7 @@ This project builds on the work of:
 
 - [AutoSubs](https://github.com/tmoroney/auto-subs) - Lua bridge over Fusion preferences on free 21.1, the channel this project adopted
 - [samuelgursky/davinci-resolve-mcp](https://github.com/samuelgursky/davinci-resolve-mcp) - MCP server for DaVinci Resolve Studio through the Python scripting API
+
+The server bundles the JPEG encoder of [jpeg-js](https://github.com/eugeneware/jpeg-js) (BSD-3-Clause: © 2014 Eugene Ware; the encoder © 2008 Adobe Systems Incorporated); both notices ship in `server/index.js`.
 
 DaVinci Resolve is a trademark of Blackmagic Design Pty Ltd. This project is not affiliated with or endorsed by Blackmagic Design.

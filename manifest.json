@@ -52,7 +52,7 @@
     "state_dir": {
       "type": "directory",
       "title": "State directory",
-      "description": "Where the request file, the lock and the server log live (mode 0700 on macOS). ${HOME} is your home folder (%USERPROFILE% on Windows). On Windows prefer an ASCII-only path.",
+      "description": "Where the request file, the lock, the server log and the frames of a capture in progress live (mode 0700 on macOS). ${HOME} is your home folder (%USERPROFILE% on Windows). On Windows prefer an ASCII-only path.",
       "default": "${HOME}/.davinci-resolve-lua-mcp",
       "required": false
     },
@@ -94,7 +94,8 @@
     { "name": "render_current_timeline", "description": "Queue and start a render of the current timeline into an existing directory, optionally from a named preset; returns the job id." },
     { "name": "get_render_status", "description": "Status, completion percentage and error of one render job, plus whether Resolve is rendering." },
     { "name": "stop_bridge", "description": "Ask the in-Resolve bridge loop to exit cleanly; it must be relaunched from Workspace > Scripts afterwards." },
-    { "name": "scripting_api_docs", "description": "Search Blackmagic's shipped Resolve scripting reference (.pyi signatures, README sections, CHANGELOG) with file and line; flags deprecated and unsupported calls." }
+    { "name": "scripting_api_docs", "description": "Search Blackmagic's shipped Resolve scripting reference (.pyi signatures, README sections, CHANGELOG) with file and line; flags deprecated and unsupported calls." },
+    { "name": "capture_frame", "description": "Frames of the current timeline as Resolve renders them, returned as JPEG images: the playhead, frames, timecodes, markers, an item or a cut." }
   ],
   "tools_generated": false,
   "privacy_policies": ["https://github.com/saadk408/davinci-resolve-lua-mcp/blob/main/PRIVACY.md"]

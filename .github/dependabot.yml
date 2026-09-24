@@ -1,6 +1,6 @@
 # Weekly dependency updates, grouped so one pull request carries them: the commit-SHA pins of the
 # actions under .github/workflows (Dependabot rewrites the pin and the `# vN` comment) and the npm
-# devDependencies. `@types/node` stays on its major: it is pinned to 20 on purpose so `tsc`
+# dependencies, runtime and dev. `@types/node` stays on its major: it is pinned to 20 on purpose so `tsc`
 # rejects APIs newer than the engines floor (CLAUDE.md, TypeScript conventions). Majors of the
 # other packages arrive as their own pull requests. Every PR still goes through the three
 # required checks; nothing merges on its own. Security alerts are a repository setting, not this

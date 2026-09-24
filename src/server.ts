@@ -1,4 +1,4 @@
-// createServer(): the McpServer with its instructions and the 15 tools. Registration and result
+// createServer(): the McpServer with its instructions and the 16 tools. Registration and result
 // shaping live here; the Lua behind each tool lives in lua.ts; talking to the bridge lives in
 // protocol.ts. Handlers never throw: every failure is an isError result that names the next step.
 import * as fsp from 'node:fs/promises';
@@ -8,10 +8,29 @@ import * as z from 'zod/v4';
 import type { Config } from './config.js';
 import { expandHome, isAsciiPath, TIMEOUT_MAX_S, TIMEOUT_MIN_S } from './config.js';
 import type { InstallResult } from './bridgeInstall.js';
+import {
+  captureFileName,
+  encodeShots,
+  expandTargets,
+  itemIdsOf,
+  MARKER_BUDGET,
+  markerQueriesOf,
+  MAX_FRAMES,
+  newCallId,
+  parseCaptureInfo,
+  parseCaptureRun,
+  removeCapture,
+  removeStaleCaptures,
+  targetSchema,
+  type CaptureTarget,
+  type Failure,
+} from './capture.js';
 import type { DocsIndex } from './docsSearch.js';
 import type { Logger } from './log.js';
 import {
   addMarkerSnippet,
+  captureInfoSnippet,
+  captureRunSnippet,
   deleteMarkersSnippet,
   listClipsSnippet,
   listProjectsSnippet,
@@ -27,7 +46,8 @@ import {
   TRACK_TYPES,
 } from './lua.js';
 import type { Envelope } from './prefs.js';
-import { BridgeError, START_INSTRUCTION, type Bridge } from './protocol.js';
+import { BridgeError, defaultIsPidAlive, START_INSTRUCTION, type Bridge } from './protocol.js';
+import { makeAnchor, timecodeToFrame } from './timecode.js';
 
 export const SERVER_NAME = 'davinci-resolve-lua-mcp';
 export const SERVER_VERSION = '0.2.0';
@@ -48,6 +68,7 @@ export const TOOL_NAMES = [
   'get_render_status',
   'stop_bridge',
   'scripting_api_docs',
+  'capture_frame',
 ] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];
 
@@ -59,11 +80,13 @@ Lua in run_lua runs inside Resolve with the live \`resolve\` global (\`fusion\` 
 
 Long synchronous API calls (RenderWithQuickExport, TranscribeAudio, Export, ArchiveProject, LoadProject on an unsaved project) block the bridge until they finish, and the bridge cannot answer Resolve's modal dialogs: start renders with render_current_timeline and poll get_render_status instead of waiting inside run_lua.
 
+capture_frame shows what the timeline looks like: it returns frames as JPEG images, so a grade, a title or framing can be checked by eye; render_current_timeline is for writing a file. Frame numbers in get_timeline_items, get_project_info, list_timelines and capture_frame are absolute timeline frames; add_marker takes a frame counted from the timeline start, which capture_frame reports as offset. Item ids for capture_frame come from get_timeline_items.
+
 Destructive tools (delete_markers) require confirm=true; pass it only after the user has agreed. Results are capped (64 KB of JSON by default); list tools paginate with offset and limit, and a truncated run_lua result says so.`;
 
 export type ToolResult = CallToolResult;
 
-/** The text of a result's first text block (every result here has exactly one). */
+/** The text of a result's first block, the summary text every result here starts with. */
 export function firstText(result: ToolResult): string {
   const first = result.content[0];
   return first && first.type === 'text' ? first.text : '';
@@ -94,9 +117,10 @@ export interface ServerDeps {
 
 // ---- result helpers -------------------------------------------------------------------------
 
-function ok(obj: Record<string, unknown>, note?: string): ToolResult {
+/** A result whose first block is the JSON of `obj` (after `note`), followed by `extra` blocks. */
+function ok(obj: Record<string, unknown>, note?: string, extra: ToolResult['content'] = []): ToolResult {
   const json = JSON.stringify(obj, null, 2);
-  return { content: [{ type: 'text', text: note ? `${note}\n${json}` : json }], structuredContent: obj };
+  return { content: [{ type: 'text', text: note ? `${note}\n${json}` : json }, ...extra], structuredContent: obj };
 }
 
 function fail(text: string, extra: Record<string, unknown> = {}): ToolResult {
@@ -626,6 +650,154 @@ export function createServer(deps: ServerDeps): McpServer {
         const { ok: _ok, ...rest } = r;
         return ok(rest);
       }),
+  );
+
+  // 16. capture_frame ---------------------------------------------------------------------------
+  /**
+   * Chunk A reads the timeline, capture.ts turns the targets into shots, chunk B exports each shot
+   * as a BMP on the Color page and puts the playhead and page back, then each BMP becomes a JPEG
+   * and is deleted. The call never leaves a capture file behind, whatever fails.
+   */
+  async function captureFrame(targets: CaptureTarget[], maxEdge: number): Promise<ToolResult> {
+    await removeStaleCaptures(config.stateDir, { now: Date.now(), ownPid: process.pid, isPidAlive: defaultIsPidAlive });
+
+    const markerQueries = markerQueriesOf(targets);
+    const a = await runSnippet(captureInfoSnippet({ itemIds: itemIdsOf(targets), markerQueries, markerBudget: MARKER_BUDGET }));
+    if ('result' in a) return a.result;
+    const info = parseCaptureInfo(a.data, markerQueries.length);
+    if (typeof info === 'string') return fail(`the bridge answered the timeline read with an unexpected shape (${info}); this is a server bug`);
+    if (info.missing_items.length > 0) {
+      const ids = info.missing_items.map((id) => JSON.stringify(id)).join(', ');
+      return fail(`no video item with id ${ids} on the current timeline; item ids come from get_timeline_items (video tracks)`, { missing_items: info.missing_items });
+    }
+    const anchor = makeAnchor({ startFrame: info.timeline.start_frame, startTimecode: info.timeline.start_timecode, fps: info.frame_rate, dropFlag: info.drop_frame });
+    if (!anchor.ok) return fail(`${anchor.error}, so frames cannot be matched to timecodes; check the frame rate and start timecode in the timeline settings in Resolve`);
+    const plan = expandTargets(targets, info, anchor.value);
+    if (plan.shots.length === 0) {
+      return fail('nothing to capture: no target resolved to a frame of the current timeline (see failed)', {
+        failed: plan.failed,
+        skipped: plan.skipped,
+        skipped_total: plan.skippedTotal,
+      });
+    }
+
+    const callId = newCallId();
+    const paths = plan.shots.map((_, i) => captureFileName(config.stateDir, process.pid, callId, i + 1));
+    try {
+      const b = await runSnippet(
+        captureRunSnippet({
+          timelineId: info.timeline.unique_id,
+          startFrame: info.timeline.start_frame,
+          startTimecode: info.timeline.start_timecode,
+          shots: plan.shots.map((s, i) => ({ path: paths[i] as string, timecode: s.timecode })),
+        }),
+        Math.max(defaultTimeoutMs, 60_000),
+      );
+      if ('result' in b) return b.result;
+      const run = parseCaptureRun(b.data, plan.shots.length);
+      if (typeof run === 'string') return fail(`the bridge answered the capture with an unexpected shape (${run}); this is a server bug`);
+      const encoded = await encodeShots(
+        paths.map((p, i) => (run.shots[i]?.ok ? p : null)),
+        maxEdge,
+      );
+
+      const frames: Array<Record<string, unknown>> = [];
+      const failed: Failure[] = [...plan.failed];
+      const blocks: ToolResult['content'] = [];
+      plan.shots.forEach((shot, i) => {
+        const rec = run.shots[i];
+        const enc = encoded[i];
+        const timecode = rec?.timecode ?? shot.timecode;
+        let frame = shot.frame;
+        let label = shot.labels.join('; ');
+        if (frame === null && rec?.ok) {
+          // The playhead: its frame follows from the timecode chunk B captured at.
+          const r = timecodeToFrame(anchor.value, timecode);
+          if (r.ok) frame = r.value.frame;
+          if (frame === info.timeline.end_frame) label = label.replace('playhead', 'playhead (the end of the timeline, after its last frame)');
+        }
+        const where = { ...(frame === null ? {} : { frame }), ...(timecode ? { timecode } : {}) };
+        if (!rec?.ok || enc === undefined || 'error' in enc) {
+          const error = !rec?.ok ? (rec?.error ?? 'not captured') : enc && 'error' in enc ? enc.error : 'not encoded';
+          failed.push({ label, targets: shot.targets, ...where, error });
+          return;
+        }
+        const index = frames.length + 1;
+        frames.push({
+          index,
+          label,
+          targets: shot.targets,
+          frame,
+          offset: frame === null ? null : frame - info.timeline.start_frame,
+          timecode,
+          width: enc.width,
+          height: enc.height,
+          bytes: enc.jpeg.length,
+          ...(enc.overBudget ? { over_budget: true } : {}),
+        });
+        blocks.push({ type: 'text', text: `Frame ${index}: ${timecode}${frame === null ? '' : ` (frame ${frame})`}: ${label}` });
+        blocks.push({ type: 'image', data: enc.jpeg.toString('base64'), mimeType: 'image/jpeg' });
+      });
+
+      const warnings: string[] = [];
+      if (run.page.switched && !run.page.restored) warnings.push(`Resolve could not be put back on the ${run.page.was ?? 'previous'} page and is on the Color page`);
+      const { was, now } = run.playhead;
+      if (was === null) warnings.push('the playhead could not be read before the capture, so it was left on the last captured frame');
+      else if (!run.playhead.restored) {
+        const wasFrame = timecodeToFrame(anchor.value, was);
+        const atEnd = wasFrame.ok && wasFrame.value.frame === info.timeline.end_frame;
+        warnings.push(
+          `the playhead could not be put back to ${was}${atEnd ? ' (the end of the timeline, after its last frame, where neither the Color page nor SetCurrentTimecode goes)' : ''}; it is at ${now ?? 'an unknown position'}`,
+        );
+      }
+      const out = {
+        timeline: info.timeline.name,
+        timeline_unique_id: info.timeline.unique_id,
+        start_frame: info.timeline.start_frame,
+        start_timecode: info.timeline.start_timecode,
+        frame_rate: parseFloat(String(info.frame_rate)),
+        drop_frame: anchor.value.dropFrame,
+        frames,
+        failed,
+        skipped: plan.skipped,
+        skipped_total: plan.skippedTotal,
+        page: run.page,
+        playhead: run.playhead,
+        ...(warnings.length ? { warnings } : {}),
+      };
+      if (frames.length === 0) {
+        return fail(`no frame could be captured (see failed)${warnings.length ? `; ${warnings.join('; ')}` : ''}`, out);
+      }
+      return ok(out, warnings.length ? `Warning: ${warnings.join('; ')}.` : undefined, blocks);
+    } finally {
+      await Promise.all(paths.map(removeCapture));
+    }
+  }
+
+  server.registerTool(
+    'capture_frame',
+    {
+      title: 'Capture timeline frames',
+      description:
+        'Exports frames of the current timeline as Resolve renders them (grade, titles, effects and upper tracks included) and returns each as a JPEG image, downscaled to max_edge, with its frame, offset and timecode in frames[] (the images follow in that order). Targets can be the playhead, frame numbers, timecodes, markers, a timeline item or a cut; up to 8 frames per call, with the rest listed in skipped and unusable targets in failed. It shows the timeline output, not the source media, and writes no file for the user; the playhead (and the page, when Resolve is not on the Color page) moves during the capture and is put back.',
+      inputSchema: z.object({
+        targets: z
+          .array(targetSchema)
+          .min(1)
+          .max(MAX_FRAMES)
+          .default([{ type: 'playhead' }])
+          .describe('What to capture, in this order (default: the playhead). A frame several targets land on is captured once.'),
+        max_edge: z
+          .int()
+          .min(160)
+          .max(1920)
+          .default(960)
+          .describe('Longest side of each image in pixels, 160..1920 (default 960). Frames are never enlarged, and several frames may come back smaller to keep the result under about 800 KB.'),
+      }),
+      outputSchema: z.looseObject({ timeline: z.string(), frames: z.array(anyRecord), failed: z.array(anyRecord) }),
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async ({ targets, max_edge }) => guard('capture_frame', () => captureFrame(targets, max_edge)),
   );
 
   return server;

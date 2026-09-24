@@ -7,6 +7,8 @@ import * as path from 'node:path';
 import { promisify } from 'node:util';
 import {
   allSnippetSamples,
+  captureInfoSnippet,
+  captureRunSnippet,
   formatRequest,
   ID_RE,
   longBracketLevel,
@@ -16,8 +18,9 @@ import {
   luaStringList,
   MARKER_COLORS,
   SESSION_RE,
+  type MarkerQuery,
 } from '../src/lua.js';
-import { makeTempDirs } from './helpers/tmp.js';
+import { makeTempDirs, repoRoot } from './helpers/tmp.js';
 import { parseRequestFile } from './helpers/fakeBridge.js';
 
 export const FUSCRIPT = '/Applications/DaVinci Resolve/DaVinci Resolve.app/Contents/Libraries/Fusion/fuscript';
@@ -162,6 +165,8 @@ const SNIPPET_EXPECTATIONS: Record<string, Expect> = {
   render: { noProject: NO_PROJECT, noTimeline: NO_TIMELINE },
   renderNoPreset: { noProject: NO_PROJECT, noTimeline: NO_TIMELINE },
   renderStatus: { noProject: NO_PROJECT, noTimeline: ['false', /^unknown render job: abc-123/] },
+  captureInfo: { noProject: NO_PROJECT, noTimeline: NO_TIMELINE },
+  captureRun: { noProject: NO_PROJECT, noTimeline: NO_TIMELINE },
 };
 
 test('every tool snippet run under fuscript against stub objects returns the expected ok/error', NEEDS_FUSCRIPT, async () => {
@@ -209,4 +214,335 @@ test('every tool snippet compiles under fuscript (LuaJIT syntax check)', NEEDS_F
   } finally {
     await dirs.cleanup();
   }
+});
+
+// ---- capture_frame's two chunks, against fuller stubs -------------------------------------------
+
+/**
+ * Run `lua` under fuscript with the bridge's own JSON encoder loaded (the bridge in its testing
+ * mode): each `emit(name, value)` becomes an entry of the result, parsed from the JSON the server
+ * would receive, so an empty Lua table arrives as `{}` here too.
+ */
+async function runEmitting(lua: string): Promise<Record<string, unknown>> {
+  const dirs = await makeTempDirs();
+  try {
+    const bridge = path.join(repoRoot(), 'bridge', 'resolve_mcp_bridge.lua');
+    const file = path.join(dirs.root, 'emit.lua');
+    const head = [
+      `local M = assert(loadfile(${luaString(bridge)}))("RLB_BRIDGE_TESTING")`,
+      'local function emit(name, v) print("EMIT\\t" .. name .. "\\t" .. M.json(v)) end',
+      'local function run_with(name, env, st, code)',
+      '  local f = assert(loadstring(code, "=" .. name))',
+      '  setfenv(f, env)',
+      '  local ok, r = pcall(f)',
+      '  emit(name, { result = ok and r or { call_failed = tostring(r) }, state = st })',
+      'end',
+    ];
+    await fsp.writeFile(file, [...head, lua].join('\n'));
+    const out = await runFuscript(file);
+    const got: Record<string, unknown> = {};
+    for (const line of out.split('\n')) {
+      const [tag, name, json] = line.split('\t');
+      if (tag === 'EMIT' && name !== undefined && json !== undefined) got[name] = JSON.parse(json);
+    }
+    return got;
+  } finally {
+    await dirs.cleanup();
+  }
+}
+
+/** A Lua table literal for flat options (strings, numbers, booleans). */
+function luaOptions(o: Record<string, string | number | boolean>): string {
+  return `{ ${Object.entries(o)
+    .map(([k, v]) => `${k} = ${typeof v === 'string' ? luaString(v) : String(v)}`)
+    .join(', ')} }`;
+}
+
+interface Emitted {
+  result: Record<string, unknown>;
+  state: Record<string, unknown>;
+}
+
+function emitted(all: Record<string, unknown>, name: string): Emitted {
+  const e = all[name] as Emitted | undefined;
+  assert.ok(e, `no output for ${name}`);
+  assert.equal(e.result['call_failed'], undefined, `${name} raised: ${String(e.result['call_failed'])}`);
+  return e;
+}
+
+// Chunk B's fake Resolve: a page and a playhead that move as the API is called. The playhead reads
+// nil on Fusion and Media (measured); options make one export throw, return false, or be followed
+// by a lying read-back, make OpenPage fail, report a render, or change the start timecode. With
+// end_tc and last_tc, a seek to the end of the timeline lands on the last frame, and color_clamps
+// makes the Color page do the same (both measured 2026-09-24).
+const CAPTURE_RUN_STUB = String.raw`
+local function capture_env(o)
+  local st = { page = o.page, tc = o.tc, opened = {}, sets = {}, exports = {} }
+  local lie_next = false
+  local tl = {
+    GetUniqueId = function() return "tl-1" end,
+    GetStartFrame = function() return 108000 end,
+    GetStartTimecode = function() return o.start_tc or "01:00:00:00" end,
+    GetCurrentTimecode = function()
+      if st.page == "fusion" or st.page == "media" then return nil end
+      if lie_next then lie_next = false; return "23:59:59:29" end
+      return st.tc
+    end,
+    SetCurrentTimecode = function(_, tc)
+      st.sets[#st.sets + 1] = tc
+      if o.end_tc and tc == o.end_tc then st.tc = o.last_tc else st.tc = tc end
+      return true
+    end,
+  }
+  local project = {
+    GetCurrentTimeline = function() return tl end,
+    IsRenderingInProgress = function() return o.rendering == true end,
+    ExportCurrentFrameAsStill = function(_, p)
+      local n = #st.exports + 1
+      st.exports[n] = { path = p, tc = st.tc, page = st.page }
+      if o.throw_on == n then error("export blew up") end
+      lie_next = (o.lie_on == n)
+      return o.fail_on ~= n
+    end,
+  }
+  local pm = { GetCurrentProject = function() return project end }
+  local resolve = {
+    GetProjectManager = function() return pm end,
+    GetCurrentPage = function() return st.page end,
+    OpenPage = function(_, p)
+      st.opened[#st.opened + 1] = p
+      if o.open_fails then return false end
+      st.page = p
+      if p == "color" and o.color_clamps and st.tc == o.end_tc then st.tc = o.last_tc end
+      return true
+    end,
+  }
+  return setmetatable({ resolve = resolve }, { __index = _G }), st
+end
+local function run_capture(name, o, code)
+  local env, st = capture_env(o)
+  run_with(name, env, st, code)
+end
+`;
+
+test('capture chunk B switches to Color, captures each shot at its timecode, and puts the playhead and page back', NEEDS_FUSCRIPT, async () => {
+  const TL = { timelineId: 'tl-1', startFrame: 108000, startTimecode: '01:00:00:00' };
+  const shots = (...tcs: string[]) => tcs.map((timecode, i) => ({ path: `/tmp/state "dir"/capture-7-0a1b2c3d-${i + 1}.bmp`, timecode }));
+  const cases: Record<string, [Record<string, string | number | boolean>, string[]]> = {
+    fromFusion: [{ page: 'fusion', tc: '01:00:02:00' }, ['01:00:08:08', '01:00:09:00']],
+    fromColor: [{ page: 'color', tc: '01:00:02:00' }, ['01:00:08:08']],
+    playheadAfterFrame: [{ page: 'edit', tc: '01:00:02:00' }, ['01:00:08:08', '']],
+    playheadOnly: [{ page: 'edit', tc: '01:00:02:00' }, ['']],
+    endColorClamps: [{ page: 'edit', tc: '01:00:21:17', end_tc: '01:00:21:17', last_tc: '01:00:21:16', color_clamps: true }, ['', '01:00:08:08']],
+    endGeneratorOnly: [{ page: 'edit', tc: '01:00:05:00', end_tc: '01:00:05:00', last_tc: '01:00:04:29' }, ['', '01:00:01:00']],
+    endPlayheadOnly: [{ page: 'cut', tc: '01:00:05:00', end_tc: '01:00:05:00', last_tc: '01:00:04:29' }, ['']],
+    lyingReadback: [{ page: 'edit', tc: '01:00:02:00', lie_on: 2 }, ['01:00:08:08', '01:00:09:00', '01:00:10:00']],
+    exportThrows: [{ page: 'cut', tc: '01:00:02:00', throw_on: 2 }, ['01:00:08:08', '01:00:09:00', '01:00:10:00']],
+    exportFalse: [{ page: 'color', tc: '01:00:02:00', fail_on: 1 }, ['01:00:08:08', '01:00:09:00']],
+    playheadUnreadable: [{ page: 'color' }, ['01:00:08:08', '']],
+    changed: [{ page: 'fusion', tc: '01:00:02:00', start_tc: '00:59:59:00' }, ['01:00:08:08']],
+    rendering: [{ page: 'deliver', tc: '01:00:02:00', rendering: true }, ['01:00:08:08']],
+    openFails: [{ page: 'fusion', tc: '01:00:02:00', open_fails: true }, ['01:00:08:08']],
+  };
+  const lua = [CAPTURE_RUN_STUB];
+  for (const [name, [opts, tcs]] of Object.entries(cases)) {
+    lua.push(`run_capture("${name}", ${luaOptions(opts)}, ${luaLongBracket(captureRunSnippet({ ...TL, shots: shots(...tcs) }))})`);
+  }
+  const all = await runEmitting(lua.join('\n'));
+  const exportsOf = (e: Emitted) => (Array.isArray(e.state['exports']) ? (e.state['exports'] as Array<Record<string, unknown>>) : []);
+
+  // From Fusion (the playhead is unreadable there): switch, capture on Color, restore both.
+  const fusion = emitted(all, 'fromFusion');
+  assert.deepEqual(fusion.result, {
+    ok: true,
+    page: { was: 'fusion', switched: true, restored: true },
+    playhead: { was: '01:00:02:00', restored: true },
+    shots: [
+      { ok: true, timecode: '01:00:08:08' },
+      { ok: true, timecode: '01:00:09:00' },
+    ],
+  });
+  assert.deepEqual(exportsOf(fusion), [
+    { path: '/tmp/state "dir"/capture-7-0a1b2c3d-1.bmp', tc: '01:00:08:08', page: 'color' },
+    { path: '/tmp/state "dir"/capture-7-0a1b2c3d-2.bmp', tc: '01:00:09:00', page: 'color' },
+  ]);
+  assert.deepEqual(fusion.state['opened'], ['color', 'fusion']);
+  assert.equal(fusion.state['page'], 'fusion');
+  assert.equal(fusion.state['tc'], '01:00:02:00');
+
+  // Already on Color: no page change at all.
+  const color = emitted(all, 'fromColor');
+  assert.deepEqual(color.result['page'], { was: 'color', switched: false, restored: true });
+  assert.deepEqual(color.state['opened'], {}, 'no OpenPage call (an empty Lua table arrives as {})');
+
+  // A playhead shot after a numbered shot is exported first, where the playhead is, with no seek;
+  // its record keeps its own position in shots.
+  const ph = emitted(all, 'playheadAfterFrame');
+  assert.deepEqual(exportsOf(ph).map((x) => x['tc']), ['01:00:02:00', '01:00:08:08']);
+  assert.deepEqual((ph.result['shots'] as unknown[])[1], { ok: true, timecode: '01:00:02:00' });
+  assert.deepEqual(ph.state['sets'], ['01:00:08:08', '01:00:02:00'], 'one seek for the frame, one to restore');
+
+  // The default call moves nothing: no seek at all.
+  const only = emitted(all, 'playheadOnly');
+  assert.deepEqual(only.state['sets'], {});
+  assert.deepEqual(only.result['playhead'], { was: '01:00:02:00', restored: true });
+
+  // At the end of the timeline: the Color page pulls the playhead to the last frame, where the
+  // playhead shot is taken; no seek reaches the end again, so the restore reports where it is.
+  const endClamp = emitted(all, 'endColorClamps');
+  assert.deepEqual(endClamp.result['shots'], [
+    { ok: true, timecode: '01:00:21:16' },
+    { ok: true, timecode: '01:00:08:08' },
+  ]);
+  assert.deepEqual(endClamp.result['playhead'], { was: '01:00:21:17', restored: false, now: '01:00:21:16' });
+  assert.deepEqual(endClamp.result['page'], { was: 'edit', switched: true, restored: true });
+
+  // With only a generator the Color page leaves the playhead at the end: the shot is taken there.
+  const endGen = emitted(all, 'endGeneratorOnly');
+  assert.deepEqual((endGen.result['shots'] as unknown[])[0], { ok: true, timecode: '01:00:05:00' });
+  assert.deepEqual(endGen.result['playhead'], { was: '01:00:05:00', restored: false, now: '01:00:04:29' });
+  const endOnly = emitted(all, 'endPlayheadOnly');
+  assert.deepEqual(endOnly.result['playhead'], { was: '01:00:05:00', restored: true }, 'nothing moved it, so nothing to restore');
+  assert.deepEqual(endOnly.state['sets'], {});
+
+  // A read-back that disagrees drops exactly that shot.
+  const lie = emitted(all, 'lyingReadback');
+  const lieShots = lie.result['shots'] as Array<Record<string, unknown>>;
+  assert.deepEqual(lieShots.map((s) => s['ok']), [true, false, true]);
+  assert.equal(lieShots[1]!['error'], 'the playhead read back as 23:59:59:29, not 01:00:09:00; the frame was dropped');
+  assert.equal(lieShots[1]!['readback'], '23:59:59:29');
+
+  // An export that throws fails its shot only; later shots run and both restores still happen.
+  const thrown = emitted(all, 'exportThrows');
+  const thrownShots = thrown.result['shots'] as Array<Record<string, unknown>>;
+  assert.deepEqual(thrownShots.map((s) => s['ok']), [true, false, true]);
+  assert.match(String(thrownShots[1]!['error']), /^Lua error: .*export blew up/);
+  assert.deepEqual(thrown.result['page'], { was: 'cut', switched: true, restored: true });
+  assert.deepEqual(thrown.result['playhead'], { was: '01:00:02:00', restored: true });
+  assert.equal(thrown.state['page'], 'cut');
+  assert.equal(thrown.state['tc'], '01:00:02:00');
+
+  const falseExport = emitted(all, 'exportFalse');
+  assert.deepEqual((falseExport.result['shots'] as unknown[])[0], {
+    ok: false,
+    timecode: '01:00:08:08',
+    readback: '01:00:08:08',
+    error: 'ExportCurrentFrameAsStill returned false',
+  });
+
+  // No playhead to read: the playhead shot fails, the numbered one works, nothing to restore.
+  const unreadable = emitted(all, 'playheadUnreadable');
+  assert.deepEqual(unreadable.result['shots'], [
+    { ok: true, timecode: '01:00:08:08' },
+    { ok: false, error: 'the playhead could not be read' },
+  ]);
+  assert.deepEqual(unreadable.result['playhead'], { restored: false });
+
+  // Refusals come before anything moves.
+  for (const [name, error] of [
+    ['changed', /^the current timeline changed after the frames were worked out; call capture_frame again$/],
+    ['rendering', /^a render is in progress/],
+    ['openFails', /^OpenPage\("color"\) returned false; open the Color page in Resolve/],
+  ] as const) {
+    const e = emitted(all, name);
+    assert.equal(e.result['ok'], false, name);
+    assert.match(String(e.result['error']), error, name);
+    assert.deepEqual(e.state['exports'], {}, `${name}: nothing exported`);
+    assert.deepEqual(e.state['sets'], {}, `${name}: the playhead never moved`);
+  }
+  assert.equal(emitted(all, 'changed').result['changed'], true);
+  assert.deepEqual(emitted(all, 'changed').state['opened'], {}, 'a changed timeline is refused before the page switch');
+  assert.deepEqual(emitted(all, 'openFails').state['opened'], ['color']);
+});
+
+// Chunk A's fake timeline: markers under unsorted keys, plus a non-marker value and a string key
+// holding a table (table.sort would fail on a mixed key list); two video tracks of items.
+const CAPTURE_INFO_STUB = String.raw`
+local function info_env()
+  local st = { listed = {} }
+  local function item(id, name, s, e)
+    return { GetUniqueId = function() return id end, GetName = function() return name end,
+      GetStart = function() return s end, GetEnd = function() return e end }
+  end
+  local tracks = {
+    { item("item-1", "Shot A", 108000, 108100) },
+    { item("item-2", "Shot B", 108050, 108200), item("item-3", "Shot C", 108200, 108300) },
+  }
+  local markers = {
+    [300] = { color = "Blue", name = string.rep("a", 99) .. "\195\169" .. "tail", note = "not returned", duration = 1 },
+    [10] = { color = "Blue", name = "Intro 100% .* x" },
+    [400] = { color = "Red", name = "100%" },
+    [150] = { color = "Blue", name = "INTRO again" },
+    [250] = { color = "Green", name = "" },
+    [20] = { color = "Red", name = "red one" },
+    [500] = "not a marker",
+    __flags = { odd = true },
+  }
+  local tl = {
+    GetName = function() return "Timeline 1" end, GetUniqueId = function() return "tl-1" end,
+    GetStartFrame = function() return 108000 end, GetEndFrame = function() return 108497 end,
+    GetStartTimecode = function() return "01:00:00:00" end,
+    GetSettings = function() return { timelineFrameRate = 29.97, timelineDropFrameTimecode = "0" } end,
+    GetMarkers = function() return markers end,
+    GetTrackCount = function(_, kind) return kind == "video" and #tracks or 0 end,
+    GetItemListInTrack = function(_, kind, i) st.listed[#st.listed + 1] = i; return tracks[i] end,
+  }
+  local project = { GetCurrentTimeline = function() return tl end }
+  local pm = { GetCurrentProject = function() return project end }
+  local resolve = { GetProjectManager = function() return pm end }
+  return setmetatable({ resolve = resolve }, { __index = _G }), st
+end
+local function run_info(name, code)
+  local env, st = info_env()
+  run_with(name, env, st, code)
+end
+`;
+
+test('capture chunk A: one marker set per query in frame order, a shared budget, clipped names, items in request order', NEEDS_FUSCRIPT, async () => {
+  const info = (itemIds: string[], markerQueries: MarkerQuery[], markerBudget = 40) => captureInfoSnippet({ itemIds, markerQueries, markerBudget });
+  const cases: Record<string, string> = {
+    queries: info([], [{ color: 'Blue' }, { contains: 'INTRO' }, { contains: '0% .*' }, { color: 'Red', contains: 'zzz' }, { contains: 'TAIL' }]),
+    budget: info([], [{ color: 'Blue' }, { contains: 'intro' }], 4),
+    items: info(['item-2', 'missing "id"', 'item-1'], []),
+    firstTrackOnly: info(['item-1'], []),
+  };
+  const lua = [CAPTURE_INFO_STUB, ...Object.entries(cases).map(([name, code]) => `run_info("${name}", ${luaLongBracket(code)})`)];
+  const all = await runEmitting(lua.join('\n'));
+
+  const mk = (offset: number, color: string, name: string) => ({ offset, frame: 108000 + offset, color, name });
+  const clipped = `${'a'.repeat(99)}...`;
+  const q = emitted(all, 'queries').result;
+  assert.deepEqual(q['timeline'], { name: 'Timeline 1', unique_id: 'tl-1', start_frame: 108000, end_frame: 108497, start_timecode: '01:00:00:00' });
+  assert.equal(q['frame_rate'], 29.97);
+  assert.equal(q['drop_frame'], '0');
+  assert.deepEqual(q['marker_sets'], [
+    { markers: [mk(10, 'Blue', 'Intro 100% .* x'), mk(150, 'Blue', 'INTRO again'), mk(300, 'Blue', clipped)], total: 3 },
+    { markers: [mk(10, 'Blue', 'Intro 100% .* x'), mk(150, 'Blue', 'INTRO again')], total: 2 },
+    { markers: [mk(10, 'Blue', 'Intro 100% .* x')], total: 1 }, // "%" and ".*" are literal, so "100%" is no match
+    { markers: {}, total: 0 },
+    { markers: [mk(300, 'Blue', clipped)], total: 1 }, // matched on the whole name, past the clip
+  ]);
+  assert.deepEqual(q['items'], {});
+  assert.deepEqual(q['missing_items'], {});
+  assert.deepEqual(emitted(all, 'queries').state['listed'], {}, 'no ids, no track scan');
+
+  // 99 ASCII bytes then a 2-byte character: the cut backs up to byte 99 rather than split it.
+  assert.equal(Buffer.byteLength(clipped), 102);
+
+  // The budget runs out inside the second set; its total still counts every match.
+  assert.deepEqual(emitted(all, 'budget').result['marker_sets'], [
+    { markers: [mk(10, 'Blue', 'Intro 100% .* x'), mk(150, 'Blue', 'INTRO again'), mk(300, 'Blue', clipped)], total: 3 },
+    { markers: [mk(10, 'Blue', 'Intro 100% .* x')], total: 2 },
+  ]);
+
+  const items = emitted(all, 'items');
+  assert.deepEqual(items.result['items'], [
+    { id: 'item-2', name: 'Shot B', start: 108050, end: 108200, track: 2 },
+    { id: 'item-1', name: 'Shot A', start: 108000, end: 108100, track: 1 },
+  ]);
+  assert.deepEqual(items.result['missing_items'], ['missing "id"']);
+  assert.deepEqual(items.result['marker_sets'], {}, 'no markers targets, no sets');
+  assert.deepEqual(items.state['listed'], [1, 2]);
+
+  assert.deepEqual(emitted(all, 'firstTrackOnly').state['listed'], [1], 'the scan stops once every id is found');
 });

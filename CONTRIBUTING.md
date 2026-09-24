@@ -24,7 +24,7 @@ use; `CLAUDE.md` is the design record.
 `server/index.js` from this checkout (`--server <path>` points it at another checkout's build, for
 example a git worktree). Then `make build` and restart Claude Desktop after each change.
 
-The dev entry and an installed copy of the extension answer to the same fifteen tool names, so
+The dev entry and an installed copy of the extension answer to the same sixteen tool names, so
 disable one of them in Claude Desktop while testing the other. When your branch changes the Lua,
 whichever server starts last overwrites the copy in Resolve's Utility folder and the other reports
 `updated` on its next start: keep the installed extension disabled until the branch is merged, or
