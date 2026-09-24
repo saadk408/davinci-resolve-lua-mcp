@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.0.0",
+    "jpeg-js": "^0.4.4",
     "zod": "^4.2.0"
   },
   "overrides": {
