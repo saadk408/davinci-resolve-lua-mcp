@@ -541,7 +541,7 @@ export function createServer(deps: ServerDeps): McpServer {
     {
       title: 'Queue and start a render',
       description:
-        'Queues a render of the current timeline into an existing output directory with the given file name, optionally after loading a named render preset, starts it without the interactive dialog, and returns the job id plus the queued job entry and the current format and codec. It returns as soon as rendering starts; poll get_render_status for progress. It does not wait for completion, does not change the Resolve page, and does not overwrite existing files on its own.',
+        'Queues a render of the current timeline into an existing output directory with the given file name, optionally after loading a named render preset, starts it without the interactive dialog, and returns the job id plus the queued job entry and the current format and codec. It returns as soon as rendering starts; poll get_render_status for progress. It does not wait for completion and does not overwrite existing files on its own. Resolve moves to the Deliver page when it renders; the tool does not switch back.',
       inputSchema: z.object({
         preset: z.string().max(200).optional().describe('Render preset name from the Deliver page; validated against the preset list. Omit to keep the current render settings.'),
         output_dir: z.string().min(1).max(4000).describe('Absolute path of an existing directory to render into ("~" is expanded).'),

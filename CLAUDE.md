@@ -322,7 +322,9 @@ facts; a point release can change them.
   request for the newer session); with live save on, `open_project` with `save_current=false` neither
   prompts nor loses work (live save is a user preference, not a `GetSettings()` key); `LoadProject`
   on a dirty project can raise a modal the bridge cannot answer, so `open_project` saves first by
-  default and interactive render mode stays off.
+  default and interactive render mode stays off; a render started through the API leaves Resolve on
+  the Deliver page although `render_current_timeline` never calls `OpenPage` (from Edit in the
+  2026-09-21 smoke run, from Color on 2026-09-24).
 
 ### Windows (documented, not measured)
 
