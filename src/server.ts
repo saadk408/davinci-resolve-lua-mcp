@@ -707,13 +707,14 @@ export function createServer(deps: ServerDeps): McpServer {
       plan.shots.forEach((shot, i) => {
         const rec = run.shots[i];
         const enc = encoded[i];
-        const label = shot.labels.join('; ');
         const timecode = rec?.timecode ?? shot.timecode;
         let frame = shot.frame;
+        let label = shot.labels.join('; ');
         if (frame === null && rec?.ok) {
           // The playhead: its frame follows from the timecode chunk B captured at.
           const r = timecodeToFrame(anchor.value, timecode);
           if (r.ok) frame = r.value.frame;
+          if (frame === info.timeline.end_frame) label = label.replace('playhead', 'playhead (the end of the timeline, after its last frame)');
         }
         const where = { ...(frame === null ? {} : { frame }), ...(timecode ? { timecode } : {}) };
         if (!rec?.ok || enc === undefined || 'error' in enc) {
@@ -740,8 +741,15 @@ export function createServer(deps: ServerDeps): McpServer {
 
       const warnings: string[] = [];
       if (run.page.switched && !run.page.restored) warnings.push(`Resolve could not be put back on the ${run.page.was ?? 'previous'} page and is on the Color page`);
-      if (run.playhead.was === null) warnings.push('the playhead could not be read before the capture, so it was left on the last captured frame');
-      else if (!run.playhead.restored) warnings.push(`the playhead could not be put back to ${run.playhead.was}`);
+      const { was, now } = run.playhead;
+      if (was === null) warnings.push('the playhead could not be read before the capture, so it was left on the last captured frame');
+      else if (!run.playhead.restored) {
+        const wasFrame = timecodeToFrame(anchor.value, was);
+        const atEnd = wasFrame.ok && wasFrame.value.frame === info.timeline.end_frame;
+        warnings.push(
+          `the playhead could not be put back to ${was}${atEnd ? ' (the end of the timeline, after its last frame, where neither the Color page nor SetCurrentTimecode goes)' : ''}; it is at ${now ?? 'an unknown position'}`,
+        );
+      }
       const out = {
         timeline: info.timeline.name,
         timeline_unique_id: info.timeline.unique_id,

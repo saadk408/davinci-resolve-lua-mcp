@@ -700,7 +700,7 @@ test('capture_frame: a read-back mismatch and a missing file fail their frames; 
       bmp: (i) => (i === 2 ? null : writeBmp(solid(64, 36, [1, 2, 3]))),
       shot: (i, tc) => (i === 1 ? { ok: false, timecode: tc, readback: '23:59:59:29', error: `the playhead read back as 23:59:59:29, not ${tc}; the frame was dropped` } : { ok: true, timecode: tc }),
       page: { was: 'fusion', switched: true, restored: false },
-      playhead: { was: '01:00:02:00', restored: false },
+      playhead: { was: '01:00:02:00', restored: false, now: '01:00:00:03' },
     }),
   );
   const r = await rig(stub);
@@ -716,10 +716,37 @@ test('capture_frame: a read-back mismatch and a missing file fail their frames; 
         [108003, '01:00:00:03', 'Resolve reported the export, but the file is not there'],
       ],
     );
-    const warning = 'Resolve could not be put back on the fusion page and is on the Color page; the playhead could not be put back to 01:00:02:00';
+    const warning = 'Resolve could not be put back on the fusion page and is on the Color page; the playhead could not be put back to 01:00:02:00; it is at 01:00:00:03';
     assert.ok(text(res).startsWith(`Warning: ${warning}.\n{`), text(res).slice(0, 200));
-    assert.deepEqual(out['warnings'], warning.split('; '));
+    assert.deepEqual(out['warnings'], [
+      'Resolve could not be put back on the fusion page and is on the Color page',
+      'the playhead could not be put back to 01:00:02:00; it is at 01:00:00:03',
+    ]);
     assert.deepEqual(await captureFiles(r.dirs.stateDir), []);
+  } finally {
+    await r.close();
+  }
+});
+
+test('capture_frame: a playhead at the end of the timeline is labelled so, and the warning says why it moved', async () => {
+  // Measured 2026-09-24: after an insert the playhead can sit at the end frame (exclusive); the
+  // Color page may leave it there, and no seek goes back to it once another frame is captured.
+  const stub = new StubBridge().reply(
+    infoReply(),
+    runReply({
+      shot: (i, tc) => ({ ok: true, timecode: i === 0 ? '01:00:16:17' : tc }),
+      playhead: { was: '01:00:16:17', restored: false, now: '01:00:16:16' },
+    }),
+  );
+  const r = await rig(stub);
+  try {
+    const res = await r.client.callTool({ name: 'capture_frame', arguments: { targets: [{ type: 'playhead' }, { type: 'frame', frame: 108001 }] } });
+    const out = structured(res);
+    const [end] = out['frames'] as Array<Record<string, unknown>>;
+    assert.deepEqual([end?.['label'], end?.['frame'], end?.['offset']], ['playhead (the end of the timeline, after its last frame)', 108497, 497]);
+    assert.deepEqual(out['warnings'], [
+      'the playhead could not be put back to 01:00:16:17 (the end of the timeline, after its last frame, where neither the Color page nor SetCurrentTimecode goes); it is at 01:00:16:16',
+    ]);
   } finally {
     await r.close();
   }

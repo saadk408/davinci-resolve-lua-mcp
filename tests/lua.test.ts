@@ -272,7 +272,9 @@ function emitted(all: Record<string, unknown>, name: string): Emitted {
 
 // Chunk B's fake Resolve: a page and a playhead that move as the API is called. The playhead reads
 // nil on Fusion and Media (measured); options make one export throw, return false, or be followed
-// by a lying read-back, make OpenPage fail, report a render, or change the start timecode.
+// by a lying read-back, make OpenPage fail, report a render, or change the start timecode. With
+// end_tc and last_tc, a seek to the end of the timeline lands on the last frame, and color_clamps
+// makes the Color page do the same (both measured 2026-09-24).
 const CAPTURE_RUN_STUB = String.raw`
 local function capture_env(o)
   local st = { page = o.page, tc = o.tc, opened = {}, sets = {}, exports = {} }
@@ -286,7 +288,11 @@ local function capture_env(o)
       if lie_next then lie_next = false; return "23:59:59:29" end
       return st.tc
     end,
-    SetCurrentTimecode = function(_, tc) st.sets[#st.sets + 1] = tc; st.tc = tc; return true end,
+    SetCurrentTimecode = function(_, tc)
+      st.sets[#st.sets + 1] = tc
+      if o.end_tc and tc == o.end_tc then st.tc = o.last_tc else st.tc = tc end
+      return true
+    end,
   }
   local project = {
     GetCurrentTimeline = function() return tl end,
@@ -307,6 +313,7 @@ local function capture_env(o)
       st.opened[#st.opened + 1] = p
       if o.open_fails then return false end
       st.page = p
+      if p == "color" and o.color_clamps and st.tc == o.end_tc then st.tc = o.last_tc end
       return true
     end,
   }
@@ -325,6 +332,10 @@ test('capture chunk B switches to Color, captures each shot at its timecode, and
     fromFusion: [{ page: 'fusion', tc: '01:00:02:00' }, ['01:00:08:08', '01:00:09:00']],
     fromColor: [{ page: 'color', tc: '01:00:02:00' }, ['01:00:08:08']],
     playheadAfterFrame: [{ page: 'edit', tc: '01:00:02:00' }, ['01:00:08:08', '']],
+    playheadOnly: [{ page: 'edit', tc: '01:00:02:00' }, ['']],
+    endColorClamps: [{ page: 'edit', tc: '01:00:21:17', end_tc: '01:00:21:17', last_tc: '01:00:21:16', color_clamps: true }, ['', '01:00:08:08']],
+    endGeneratorOnly: [{ page: 'edit', tc: '01:00:05:00', end_tc: '01:00:05:00', last_tc: '01:00:04:29' }, ['', '01:00:01:00']],
+    endPlayheadOnly: [{ page: 'cut', tc: '01:00:05:00', end_tc: '01:00:05:00', last_tc: '01:00:04:29' }, ['']],
     lyingReadback: [{ page: 'edit', tc: '01:00:02:00', lie_on: 2 }, ['01:00:08:08', '01:00:09:00', '01:00:10:00']],
     exportThrows: [{ page: 'cut', tc: '01:00:02:00', throw_on: 2 }, ['01:00:08:08', '01:00:09:00', '01:00:10:00']],
     exportFalse: [{ page: 'color', tc: '01:00:02:00', fail_on: 1 }, ['01:00:08:08', '01:00:09:00']],
@@ -364,10 +375,35 @@ test('capture chunk B switches to Color, captures each shot at its timecode, and
   assert.deepEqual(color.result['page'], { was: 'color', switched: false, restored: true });
   assert.deepEqual(color.state['opened'], {}, 'no OpenPage call (an empty Lua table arrives as {})');
 
-  // A playhead shot after a numbered shot captures the original playhead, not where the first shot left it.
+  // A playhead shot after a numbered shot is exported first, where the playhead is, with no seek;
+  // its record keeps its own position in shots.
   const ph = emitted(all, 'playheadAfterFrame');
-  assert.deepEqual(exportsOf(ph).map((x) => x['tc']), ['01:00:08:08', '01:00:02:00']);
+  assert.deepEqual(exportsOf(ph).map((x) => x['tc']), ['01:00:02:00', '01:00:08:08']);
   assert.deepEqual((ph.result['shots'] as unknown[])[1], { ok: true, timecode: '01:00:02:00' });
+  assert.deepEqual(ph.state['sets'], ['01:00:08:08', '01:00:02:00'], 'one seek for the frame, one to restore');
+
+  // The default call moves nothing: no seek at all.
+  const only = emitted(all, 'playheadOnly');
+  assert.deepEqual(only.state['sets'], {});
+  assert.deepEqual(only.result['playhead'], { was: '01:00:02:00', restored: true });
+
+  // At the end of the timeline: the Color page pulls the playhead to the last frame, where the
+  // playhead shot is taken; no seek reaches the end again, so the restore reports where it is.
+  const endClamp = emitted(all, 'endColorClamps');
+  assert.deepEqual(endClamp.result['shots'], [
+    { ok: true, timecode: '01:00:21:16' },
+    { ok: true, timecode: '01:00:08:08' },
+  ]);
+  assert.deepEqual(endClamp.result['playhead'], { was: '01:00:21:17', restored: false, now: '01:00:21:16' });
+  assert.deepEqual(endClamp.result['page'], { was: 'edit', switched: true, restored: true });
+
+  // With only a generator the Color page leaves the playhead at the end: the shot is taken there.
+  const endGen = emitted(all, 'endGeneratorOnly');
+  assert.deepEqual((endGen.result['shots'] as unknown[])[0], { ok: true, timecode: '01:00:05:00' });
+  assert.deepEqual(endGen.result['playhead'], { was: '01:00:05:00', restored: false, now: '01:00:04:29' });
+  const endOnly = emitted(all, 'endPlayheadOnly');
+  assert.deepEqual(endOnly.result['playhead'], { was: '01:00:05:00', restored: true }, 'nothing moved it, so nothing to restore');
+  assert.deepEqual(endOnly.state['sets'], {});
 
   // A read-back that disagrees drops exactly that shot.
   const lie = emitted(all, 'lyingReadback');

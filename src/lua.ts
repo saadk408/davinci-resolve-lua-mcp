@@ -481,9 +481,12 @@ return { ok = true,
  * capture_frame, chunk B: on the Color page (the one page whose viewer always shows the timeline,
  * measured 2026-09-24), seek to each shot's timecode, export the frame to its path and check the
  * playhead read-back; then put the playhead and the page back, whatever happened. A shot with
- * timecode "" is the playhead: it seeks back to the position read at the start, because earlier
- * shots have moved it. Refuses before touching anything when the timeline is not the one chunk A
- * described, or a render is running.
+ * timecode "" is the playhead: the playhead shots run first and export where the playhead is,
+ * with no seek, because a seek cannot reach every position (Resolve stops SetCurrentTimecode at
+ * the last frame when the playhead sits at the end of the timeline, measured 2026-09-24).
+ * shots[i] still answers shot i. The position to restore is read on the original page, since the
+ * Color page itself can move the playhead off the end; restored means it reads back there. Refuses
+ * before touching anything when the timeline is not the one chunk A described, or a render is running.
  */
 export function captureRunSnippet(req: {
   timelineId: string;
@@ -502,6 +505,12 @@ end
 if project:IsRenderingInProgress() then
   return { ok = false, error = "a render is in progress; wait for it to finish (get_render_status), then call capture_frame again" }
 end
+local function read_tc()
+  local okt, tc = pcall(function() return tl:GetCurrentTimecode() end)
+  if okt and type(tc) == "string" and tc ~= "" then return tc end
+  return nil
+end
+local before_tc = read_tc()
 local was_page = resolve:GetCurrentPage()
 local switched = false
 if was_page ~= "color" then
@@ -510,17 +519,18 @@ if was_page ~= "color" then
   end
   switched = true
 end
-local okt, was_tc = pcall(function() return tl:GetCurrentTimecode() end)
-if not okt or type(was_tc) ~= "string" or was_tc == "" then was_tc = nil end
+local was_tc = read_tc()
+local order = {}
+for i = 1, #paths do if tcs[i] == "" then order[#order + 1] = i end end
+for i = 1, #paths do if tcs[i] ~= "" then order[#order + 1] = i end end
 local shots = {}
-for i = 1, #paths do
+for _, i in ipairs(order) do
   local ok, rec = pcall(function()
     local want = tcs[i]
     if want == "" then
       if was_tc == nil then return { ok = false, error = "the playhead could not be read" } end
       want = was_tc
-    end
-    if not tl:SetCurrentTimecode(want) then
+    elseif not tl:SetCurrentTimecode(want) then
       return { ok = false, timecode = want, error = "SetCurrentTimecode returned false" }
     end
     local exported = project:ExportCurrentFrameAsStill(paths[i])
@@ -534,10 +544,12 @@ for i = 1, #paths do
   end)
   shots[i] = ok and rec or { ok = false, error = "Lua error: " .. tostring(rec) }
 end
-local tc_restored = false
-if was_tc ~= nil then
-  local ok2, r2 = pcall(function() return tl:SetCurrentTimecode(was_tc) end)
-  tc_restored = ok2 and r2 == true
+local target = before_tc or was_tc
+local tc_restored, tc_now = false, nil
+if target ~= nil then
+  pcall(function() if tl:GetCurrentTimecode() ~= target then tl:SetCurrentTimecode(target) end end)
+  tc_now = read_tc()
+  tc_restored = tc_now == target
 end
 local page_restored = not switched
 if switched then
@@ -545,7 +557,7 @@ if switched then
   page_restored = ok3 and r3 == true
 end
 return { ok = true, page = { was = was_page, switched = switched, restored = page_restored },
-  playhead = { was = was_tc, restored = tc_restored }, shots = shots }
+  playhead = { was = target, restored = tc_restored, now = (not tc_restored) and tc_now or nil }, shots = shots }
 `;
 }
 

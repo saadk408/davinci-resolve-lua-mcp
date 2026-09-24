@@ -120,12 +120,15 @@ test('parseCaptureRun reads chunk B and checks one record per shot', () => {
   };
   assert.deepEqual(parseCaptureRun(data, 2), {
     page: { was: 'edit', switched: true, restored: true },
-    playhead: { was: '01:00:02:00', restored: true },
+    playhead: { was: '01:00:02:00', restored: true, now: null },
     shots: [{ ok: true, timecode: '01:00:02:00' }, { ok: false, timecode: '01:00:03:00', readback: 'x', error: 'e' }],
   });
   const unread = parseCaptureRun({ ...data, playhead: { restored: false } }, 2);
   assert.ok(typeof unread !== 'string');
   assert.equal(unread.playhead.was, null, 'a nil playhead arrives absent and reads as null');
+  const moved = parseCaptureRun({ ...data, playhead: { was: '01:00:05:00', restored: false, now: '01:00:04:29' } }, 2);
+  assert.ok(typeof moved !== 'string');
+  assert.deepEqual(moved.playhead, { was: '01:00:05:00', restored: false, now: '01:00:04:29' });
   assert.match(String(parseCaptureRun(data, 3)), /2 shot records for 3 shots/);
   assert.match(String(parseCaptureRun({ ...data, page: 'x' }, 2)), /no page or playhead/);
   assert.match(String(parseCaptureRun({ ...data, shots: [{ timecode: 'x' }, { ok: true }] }, 2)), /no ok flag/);

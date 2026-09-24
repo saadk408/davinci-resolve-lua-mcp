@@ -201,8 +201,11 @@ export interface RunShot {
 /** Chunk B's reply, checked. */
 export interface CaptureRun {
   page: { was: string | null; switched: boolean; restored: boolean };
-  /** was is null when the playhead could not be read before the capture. */
-  playhead: { was: string | null; restored: boolean };
+  /**
+   * was: the position to restore (read on the original page), null when unreadable; now: where
+   * the playhead is when it was not restored (Resolve cannot seek to the end of the timeline).
+   */
+  playhead: { was: string | null; restored: boolean; now: string | null };
   /** One record per shot, in shot order. */
   shots: RunShot[];
 }
@@ -227,7 +230,11 @@ export function parseCaptureRun(data: Record<string, unknown>, shotCount: number
   }
   return {
     page: { was: typeof page['was'] === 'string' ? page['was'] : null, switched: page['switched'] === true, restored: page['restored'] === true },
-    playhead: { was: typeof playhead['was'] === 'string' ? playhead['was'] : null, restored: playhead['restored'] === true },
+    playhead: {
+      was: typeof playhead['was'] === 'string' ? playhead['was'] : null,
+      restored: playhead['restored'] === true,
+      now: typeof playhead['now'] === 'string' ? playhead['now'] : null,
+    },
     shots: out,
   };
 }
