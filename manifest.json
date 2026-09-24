@@ -52,7 +52,7 @@
     "state_dir": {
       "type": "directory",
       "title": "State directory",
-      "description": "Where the request file, the lock and the server log live (mode 0700 on macOS). ${HOME} is your home folder (%USERPROFILE% on Windows). On Windows prefer an ASCII-only path.",
+      "description": "Where the request file, the lock, the server log and the frames of a capture in progress live (mode 0700 on macOS). ${HOME} is your home folder (%USERPROFILE% on Windows). On Windows prefer an ASCII-only path.",
       "default": "${HOME}/.davinci-resolve-lua-mcp",
       "required": false
     },

@@ -16,7 +16,7 @@ file that Claude Desktop runs with its own Node. Version 0.1.0 was the first pub
 added the Windows port blind (no Windows machine): every Windows fact in this file is
 documented-not-measured until the checklist in `docs/windows.md` has been run by a contributor.
 
-`README.md` is the user documentation (install, start and stop, the 15-tool table with the `run_lua`
+`README.md` is the user documentation (install, start and stop, the 16-tool table with the `run_lua`
 guide, the settings and `RLB_*` variables, troubleshooting, security, uninstall, the make targets);
 do not repeat it here. `CONTRIBUTING.md` is the contributor guide (branch flow, the gate, the
 release steps, the developer loop). `SECURITY.md` is the reporting policy; `PRIVACY.md` is the
@@ -115,15 +115,22 @@ bridge/resolve_mcp_bridge.lua (Scripts-menu Lua state, holds live `resolve`)
 - Runtime state: `RLB_STATE_DIR` (default `~/.davinci-resolve-lua-mcp`, 0700 on macOS; Windows ignores
   the mode and inherits the profile ACLs) holds `next.lua`, `next.lua.tmp`, `lock` (a pid file
   hard-linked into place, taken per request, absent while idle), `lock.takeover` (exists only during
-  the takeover of a dead holder's lock; one older than 30 s is abandoned and removed) and
-  `server.log`. No queue directories, no heartbeat file, no stop file.
+  the takeover of a dead holder's lock; one older than 30 s is abandoned and removed),
+  `server.log` and, during a `capture_frame` call, `capture-<pid>-<callid>-<n>.bmp` (the frames
+  Resolve exports; each is deleted once it is a JPEG and again in the call's `finally`, and every
+  call first deletes those of a dead pid or older than 10 minutes, never a live server's fresh
+  ones: the installed extension and a dev entry share the directory). No queue directories, no
+  heartbeat file, no stop file.
   `retryTransient()` in `protocol.ts` retries `EBUSY`/`EPERM`/`EACCES` for about a second on the
   request file's rename and delete only: Windows refuses both while the bridge's `loadfile` holds
   `next.lua` open (it re-reads the file every 50 ms), and never on the lock (Node-to-Node, opened with
   share-delete). `main.ts` also handles `SIGBREAK` (Windows Ctrl+Break); Claude Desktop stops the
   server by closing stdin on both platforms (Windows cannot deliver SIGTERM).
-- Layout: `src/` (ten modules; `main.ts` is the wiring, `server.ts` the tools, `lua.ts` the snippets,
-  `protocol.ts` the slot and lock, `prefs.ts` the reader, `bridgeInstall.ts` the self-install),
+- Layout: `src/` (thirteen modules; `main.ts` is the wiring, `server.ts` the tools, `lua.ts` the
+  snippets, `protocol.ts` the slot and lock, `prefs.ts` the reader, `bridgeInstall.ts` the
+  self-install, `capture.ts` capture_frame's targets, expansion, file cleanup and JPEG step,
+  `image.ts` the BMP reader, downscale and encoder, `timecode.ts` the SMPTE arithmetic; plus
+  `jpeg-js-encoder.d.ts`, a declaration),
   `server/index.js` (built, git-ignored, shipped), `bridge/resolve_mcp_bridge.lua`, `scripts/`
   (`claude_diag.lua` ships; `gen-types.mjs`, `dev-register.mjs`, `set-version.mjs`, `smoke.mjs`,
   `release-notes.sh`, `registry-entry.mjs` are developer-only), `types/resolve_host.d.lua` +
@@ -154,7 +161,9 @@ Targets (`Makefile`; the README has the table): `test` = `test-lua` + `test-node
   with the two-line banner filtered by `grep -v -e '^DaVinci Resolve Script' -e '^Copyright'`.
 - `make smoke SMOKE_PROJECT="<open project>"` mutates the named project (a `bridge-smoke` timeline,
   the render TargetDir/CustomName, which the API cannot read back, hence the name must equal the open
-  project's). `SMOKE_FLAGS=--no-render`, `--timeout <s>`; logs under `.out/`. The lock is per
+  project's). Its `capture_frame` checks run on that timeline: with the playhead still at the end
+  where the generator insert leaves it (the tool must report truthfully where it left it), after a
+  seek to `01:00:02:00` (three frames, exact restores) and from the Fairlight page. `SMOKE_FLAGS=--no-render`, `--timeout <s>`; logs under `.out/`. The lock is per
   request, so it runs alongside the installed extension; `lock_held` names a pid whose request
   outlasted the wait (or a stale lock whose pid is alive). Without `--project`, `scripts/smoke.mjs` is
   the read-only coexistence check. A 10-minute watchdog fails the run when a modal in Resolve wedges
@@ -165,7 +174,7 @@ Targets (`Makefile`; the README has the table): `test` = `test-lua` + `test-node
 - `make bundle` = `npm run bundle` (npm puts the pinned `mcpb` on PATH; never `npx`, unreliable on
   npm 11): `mcpb validate`, `pack`, `info`, then `tests/check_bundle.mjs`, which unpacks with
   `mcpb unpack`, checks the exact file list and the size, and probes the unpacked server over stdio
-  (`tools/list` = 15 tools, `resolve_status.platform` = `process.platform`, no lock left) under temp
+  (`tools/list` = 16 tools, `resolve_status.platform` = `process.platform`, no lock left) under temp
   dirs with the self-install off. Two packs give the same file list but different bytes (zip mtime);
   compare with `zipinfo -1`. `make sign` is optional and self-signed.
 - `make dev-register` merges a `davinci-resolve-lua-mcp-dev` entry into the real config after backing
@@ -273,7 +282,9 @@ Targets (`Makefile`; the README has the table): `test` = `test-lua` + `test-node
   modules, `.listen(`, raw template holes in Lua strings) and every tracked file except the two
   gates for the vendor name it explains (`git ls-files`; outside a checkout, the shipped sources);
   `tests/check_bundle.mjs` checks the packed file list, size under 2 MB, that the same name is
-  absent from the unpacked `server/index.js`, `manifest.json` and `package.json`, and a stdio
+  absent from the unpacked `server/index.js`, `manifest.json` and `package.json`, that
+  `server/index.js` carries both jpeg-js copyright lines and not the jpeg-js decoder
+  (`maxResolutionInMP`, a decoder-only string), and a stdio
   `tools/list` + `resolve_status` probe of the unpacked server under temp dirs with the
   self-install off (both platforms; it spawns the pinned `mcpb unpack`).
 - `make lint-lua`: `gen-types.mjs --check` (stale means `make gen-types`), then `lua-language-server
@@ -325,6 +336,32 @@ facts; a point release can change them.
   default and interactive render mode stays off; a render started through the API leaves Resolve on
   the Deliver page although `render_current_timeline` never calls `OpenPage` (from Edit in the
   2026-09-21 smoke run, from Color on 2026-09-24).
+- `capture_frame` rests on these (21.1.0.17, `bridge-scratch`, 2026-09-24):
+  - `Project:ExportCurrentFrameAsStill(path)` writes the frame under the timeline playhead as the
+    viewer shows it: frame-exact (it matched a Deliver render of the same frame within 1/255; the
+    next frame differed), with the grade and upper tracks, at the timeline resolution with no size
+    control; it touches no render settings, queue, gallery or page. `.jpg .png .tif .dpx .bmp`
+    work; `.jpeg .exr .webp` return false and write nothing. A 1080p BMP is 6,220,854 bytes: a
+    14-byte file header, a 40-byte `BITMAPINFOHEADER`, 24-bit `BI_RGB`, bottom-up, BGR, complete
+    when the call returns, mode 0666 inside the 0700 state dir. 38-47 ms for a frame the viewer
+    already shows, 250-500 ms for an undecoded 4K H.264 frame.
+  - It returns false on the Media, Fusion, Fairlight and Deliver pages, where `OpenPage("color")`
+    then an immediate export works; `GetCurrentTimecode` is nil on Fusion and Media. On the Edit
+    page with the single viewer on Source, and on the Cut page in Source Tape mode, it exports the
+    source clip, undetectably (the read-back still matches and the API cannot read the viewer
+    mode); the Color page always exported the timeline. Hence the tool's switch to Color and back.
+    Not measured: the Color viewer's wipe and highlight modes.
+  - `Timeline:GetStartFrame()` counts in the timeline's own timecode system (drop-frame
+    `01:00:00;00` = 107892); `SetCurrentTimecode` reads `:` and `;` alike in the timeline's mode and
+    snaps a label drop-frame skips forward while returning true, so `timecode.ts` refuses those;
+    `GetEndFrame` and `GetEnd` are exclusive; `GetMarkers()` keys count from the timeline start.
+  - The end of the timeline: after `InsertGeneratorIntoTimeline` or `AppendToTimeline` the playhead
+    can sit at `GetEndFrame()`, one past the last frame. `SetCurrentTimecode` to that label returns
+    true but lands on the last frame; `OpenPage("color")` moved it there too with a clip under it
+    (not with only a generator); an export there writes the last frame. In the same chunk as the
+    insert `GetCurrentTimecode` still read the old position; the next request read the end. So
+    chunk B captures the playhead first with no seek, restores towards the position read before
+    the page switch, and reports `restored` from a read-back.
 
 ### Windows (documented, not measured)
 
@@ -338,6 +375,7 @@ From Blackmagic's shipped README unless marked otherwise; nothing here has been 
 | `fuscript` | `C:\Program Files\Blackmagic Design\DaVinci Resolve\fuscript.exe` (unused by the tooling) |
 | State dir | `%USERPROFILE%\.davinci-resolve-lua-mcp`, stamped with forward slashes |
 | Claude Desktop | `%APPDATA%\Claude\...`; the Microsoft Store build redirects it under `%LOCALAPPDATA%\Packages\Claude_<id>\LocalCache\Roaming\Claude\` |
+| `capture_frame` export path | `<state dir>/capture-<pid>-<callid>-<n>.bmp` with forward slashes, passed to `ExportCurrentFrameAsStill` as is (untested on Windows; W14 in `docs/windows.md`) |
 
 Nothing in the sandbox census, `SavePrefs` (rename or in place), the takeover, `loadfile` with
 forward slashes, the ANSI-vs-UTF-8 `fopen` behind `loadfile` (a non-ASCII `%USERPROFILE%` may break
@@ -391,6 +429,12 @@ measured on.
   skip output validation. Context7 id `/modelcontextprotocol/typescript-sdk` (`main`) is the v2 SDK;
   check versions with `npm view @modelcontextprotocol/server version` (`npm view
   @modelcontextprotocol/sdk` shows only the legacy line).
+- Runtime dependencies are the SDK, zod and jpeg-js (0.4.4, BSD-3-Clause, pure JS; Node has no JPEG
+  codec). `src/image.ts` imports `jpeg-js/lib/encoder.js` alone (typed by
+  `src/jpeg-js-encoder.d.ts`; the package has no exports map), so the decoder, where jpeg-js's past
+  advisories were, is never bundled; the tests may use the typed `decode` from the package index.
+  jpeg-js has no legal comments, so `image.ts` carries both notices in a `/*! */` block, the only
+  comments esbuild keeps (moved to the end of `server/index.js`); `check_bundle.mjs` enforces both.
 - `main(options)` in `src/main.ts` is the wiring; `src/index.ts` is `void main()`. Its five hooks are
   a stable extension surface for downstream builds that import `main`, no-ops by default:
   `wrapServer` (applied in the `serveStdio` factory right after `createServer`; must return that

@@ -1,6 +1,6 @@
 # Privacy Policy
 
-Effective 2026-09-21. This policy covers the DaVinci Resolve Lua MCP extension: the `.mcpb` bundle, the MCP server inside it, and the two Lua scripts it installs into DaVinci Resolve's user scripts folder.
+Effective 2026-09-24. This policy covers the DaVinci Resolve Lua MCP extension: the `.mcpb` bundle, the MCP server inside it, and the two Lua scripts it installs into DaVinci Resolve's user scripts folder.
 
 ## Summary
 
@@ -10,9 +10,10 @@ Effective 2026-09-21. This policy covers the DaVinci Resolve Lua MCP extension: 
 
 ## What the extension processes and where it is stored
 
-Tool calls from Claude carry inputs: Lua code for `run_lua`, marker text, timeline and project names, output paths. Resolve answers with data about the open project: project, timeline, clip and marker metadata, media file paths, render settings. All of it stays in these places on your computer:
+Tool calls from Claude carry inputs: Lua code for `run_lua`, marker text, timeline and project names, output paths, the frames to capture. Resolve answers with data about the open project: project, timeline, clip and marker metadata, media file paths, render settings, and, for `capture_frame`, pictures of the timeline. All of it stays in these places on your computer:
 
 - **The request file** `next.lua` in the state directory (default `~/.davinci-resolve-lua-mcp` on macOS and `%USERPROFILE%\.davinci-resolve-lua-mcp` on Windows; created with mode 0700 on macOS, with your profile folder's permissions on Windows). It holds one request, including the full Lua chunk, and the server deletes it as soon as the answer arrives, also after a timeout.
+- **Captured frames** `capture-<pid>-<id>-<n>.bmp` in the state directory: the full-resolution frames Resolve exports for `capture_frame`. The server converts each to a smaller JPEG in memory, returns it in the tool result and deletes the file, all within the call; a later call removes any that a crashed server left behind. The JPEGs are never written to disk.
 - **The last answer** in Resolve's preferences file `~/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Profiles/Default/Fusion.prefs` (Windows: `%APPDATA%\Blackmagic Design\DaVinci Resolve\Support\Fusion\Profiles\Default\Fusion.prefs`), under the key `Global.ResolveLuaBridge.RLBResp`, hex-encoded and not encrypted. It is the complete result of the most recent tool call and stays until the next call or the next bridge launch overwrites it. A session record (`RLBSession`: session id, Resolve's process id, product and version, the state directory path) sits next to it. On the measured Mac that file has mode 0666, so other local accounts can read it; on Windows it inherits `%APPDATA%`'s permissions, which by default keep other standard accounts out (not measured). A clean stop replaces the answer with the stop acknowledgement.
 - **The server log** `server.log` in the state directory: timestamps, request and session ids, operation names (`ping`, `run`, `stop`), byte counts, durations, process ids, file paths (which include your home folder), version strings and error messages. A failing tool's error message can quote text from Resolve or Lua, such as a project name. The log never records tool names, tool arguments, Lua code or results. It is emptied when it passes 5 MB.
 - **Claude Desktop's copy** of the server's standard error, the same log lines, at `~/Library/Logs/Claude/mcp-server-DaVinci Resolve Lua MCP.log` (Windows: `%APPDATA%\Claude\logs\`; a Microsoft Store install keeps it under `%LOCALAPPDATA%\Packages\Claude_<id>\LocalCache\Roaming\Claude\logs\`), kept under Claude Desktop's own rules.
@@ -20,7 +21,7 @@ Tool calls from Claude carry inputs: Lua code for `run_lua`, marker text, timeli
 
 ## What leaves your computer
 
-Nothing, from the extension. Claude Desktop sends tool inputs and results to Anthropic as part of your conversation, as it does for any tool; [Anthropic's privacy policy](https://www.anthropic.com/legal/privacy) governs that. The download itself comes from GitHub, under [GitHub's privacy statement](https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement).
+Nothing, from the extension. Claude Desktop sends tool inputs and results, including the frames `capture_frame` returns as images, to Anthropic as part of your conversation, as it does for any tool; [Anthropic's privacy policy](https://www.anthropic.com/legal/privacy) governs that. The download itself comes from GitHub, under [GitHub's privacy statement](https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement).
 
 ## Third parties
 
@@ -28,7 +29,7 @@ The extension shares nothing with anyone. Anthropic (through Claude Desktop) and
 
 ## Retention and deletion
 
-- The request file: one call.
+- The request file and captured frames: one call.
 - The last answer and the session record in `Fusion.prefs`: until overwritten; under 2 KB after a clean stop. Remove the `Global.ResolveLuaBridge.*` keys to clear them.
 - The server log: until you delete it or it passes 5 MB.
 - Everything else: until you follow the Uninstall steps in the [README](https://github.com/saadk408/davinci-resolve-lua-mcp#uninstall): remove the extension, delete the two scripts, delete the state directory.

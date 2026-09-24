@@ -95,7 +95,15 @@ assumes, what a Windows contributor should confirm, the commands to do it with, 
 7. Takeover (W8): click `Workspace > Scripts > resolve_mcp_bridge` a second time, then
    `resolve_status` twice. Expect a new session id and `alive: true` both times; the server log
    shows the session change and no error.
-8. `stop_bridge`: expect `ok`; then `resolve_status` reports `stopped`.
+8. `capture_frame` with no arguments on the scratch timeline (W14): expect one image, and
+   `page.restored` and `playhead.restored` true. Then list the state directory: no
+   `capture-*.bmp` file may be left.
+
+   ```powershell
+   Get-ChildItem -LiteralPath "$env:USERPROFILE\.davinci-resolve-lua-mcp" -Filter 'capture-*.bmp'
+   ```
+
+9. `stop_bridge`: expect `ok`; then `resolve_status` reports `stopped`.
 
 ## Step 3: run claude_diag and decode RLBDiag
 
@@ -144,6 +152,7 @@ assumes, what a Windows contributor should confirm, the commands to do it with, 
 | W11 | Sharing errors on `next.lua` (`EBUSY`, `EPERM`) and whether the retry absorbs them | Step 2.6 | server log | none on macOS |
 | W12 | Claude Desktop substitutes `${HOME}` on Windows | Step 1.2: `state_dir` is `C:/Users/<you>/.davinci-resolve-lua-mcp` and `config_problems` is empty | | passed through literally, expanded by the server |
 | W13 | Claude Desktop's folders for your install kind | The next section | | `~/Library/Application Support/Claude/`, `~/Library/Logs/Claude/` |
+| W14 | `ExportCurrentFrameAsStill` writes a BMP to a forward-slash path in the state directory, and the server can delete it afterwards | Step 2.8 | the result's `frames[]` and `failed[]`; the state directory listing | measured 2026-09-24 |
 
 ## Where the logs are
 
