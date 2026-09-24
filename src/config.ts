@@ -122,12 +122,20 @@ export function isAsciiPath(p: string): boolean {
   return !/[^\x20-\x7e]/.test(p);
 }
 
+/**
+ * A `user_config` setting with no manifest `default` that the user never saved reaches the server
+ * as its unfilled placeholder: Claude Desktop 2.7032.0 passed `${user_config.scripts_dir}` and
+ * `${user_config.prefs_dir}` literally (measured 2026-09-24).
+ */
+const UNFILLED_USER_CONFIG = /^\$\{user_config\.\w+\}$/;
+
 function pick(env: NodeJS.ProcessEnv, name: string): string | undefined {
   const raw = env[name];
   if (raw === undefined) return undefined;
   const trimmed = raw.trim();
-  // MCPB substitutes "" for an unset directory picker; treat it as unset.
-  return trimmed === '' ? undefined : trimmed;
+  // An unset setting arrives as "" (an empty directory picker) or as its unfilled placeholder;
+  // both mean unset, so the platform default applies without a problem.
+  return trimmed === '' || UNFILLED_USER_CONFIG.test(trimmed) ? undefined : trimmed;
 }
 
 /** Drop trailing separators, but never turn a root (`/`, `C:\`) into something else. */

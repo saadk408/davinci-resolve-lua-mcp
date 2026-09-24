@@ -104,6 +104,29 @@ test('the literal ${HOME} defaults Claude Desktop 2.2553.1 passes through are ex
   assert.deepEqual(c.problems, []);
 });
 
+test('the unfilled ${user_config.<key>} placeholders Claude Desktop 2.7032.0 passes for unsaved settings count as unset', () => {
+  const c = loadConfig(
+    {
+      RLB_SCRIPTS_DIR: '${user_config.scripts_dir}',
+      RLB_PREFS_DIR: ' ${user_config.prefs_dir} ',
+      RLB_AUTO_INSTALL: '${user_config.auto_install_bridge}',
+      RLB_DEFAULT_TIMEOUT_S: '${user_config.default_timeout_s}',
+    },
+    HOME,
+    D,
+  );
+  assert.equal(c.scriptsDir, '/Users/tester/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Utility');
+  assert.equal(c.prefsDir, '/Users/tester/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Profiles');
+  assert.equal(c.autoInstall, true);
+  assert.equal(c.defaultTimeoutS, 30);
+  assert.deepEqual(c.problems, []);
+  // Only a whole placeholder means unset; anything around or inside it is still validated.
+  const d = loadConfig({ RLB_SCRIPTS_DIR: '${user_config.scripts_dir}/x', RLB_PREFS_DIR: '${user_config.}' }, HOME, D);
+  assert.equal(d.problems.length, 2);
+  assert.match(d.problems[0] ?? '', /RLB_SCRIPTS_DIR/);
+  assert.match(d.problems[1] ?? '', /RLB_PREFS_DIR/);
+});
+
 // Windows: Blackmagic's shipped README documents the per-user folders under
 // %APPDATA%\Blackmagic Design\DaVinci Resolve\Support\ and the docs under %PROGRAMDATA%; the
 // state dir is spelled with forward slashes because it is stamped into the Lua files.
