@@ -3,7 +3,8 @@
 // (server/index.js) over stdio exactly as Claude Desktop does, connects with the MCP client and
 // drives the tools against the live bridge running inside DaVinci Resolve. It creates and deletes a
 // timeline named bridge-smoke, puts a generator or a root-bin clip on it, adds and deletes markers
-// on it and renders it into a temp directory. The render changes the project's render TargetDir and
+// on it, captures frames of it (capture_frame, from its page and from Fairlight) and renders it into
+// a temp directory. The render changes the project's render TargetDir and
 // CustomName (the API has no getter to restore them), so --project must name the open scratch
 // project. Nothing else is touched; SaveProject is never called. One line per check, then
 // `SMOKE_RESULT: PASS|FAIL`; exit 0 only when nothing failed. Plain Node 20 ESM; the only
@@ -170,13 +171,38 @@ async function connect() {
   console.log(`server: ${process.execPath} ${serverJs} (pid ${transport.pid ?? '?'}), env ${Object.keys(env).join(' ')}, log .out/smoke-server.log`);
 }
 
-/** callTool with an explicit timeout; results are read from structuredContent only. */
+/** callTool with an explicit timeout; results are read from structuredContent, plus any image blocks. */
 async function call(name, toolArgs = {}, waitS = defaultWaitS) {
   const res = await client.callTool({ name, arguments: toolArgs }, { timeout: (waitS + 15) * 1000 });
   const data = res.structuredContent && typeof res.structuredContent === 'object' ? res.structuredContent : {};
-  const first = Array.isArray(res.content) ? res.content[0] : undefined;
+  const content = Array.isArray(res.content) ? res.content : [];
+  const first = content[0];
   const text = first && first.type === 'text' ? first.text : '';
-  return { isError: res.isError === true, data, text };
+  const images = content.filter((c) => c && c.type === 'image');
+  return { isError: res.isError === true, data, text, images };
+}
+
+/** The page and playhead of the smoke timeline, read without moving anything (nil tc on Fusion and Media). */
+async function pageAndPlayhead() {
+  return lua(`${LUA_PRELUDE}local tl = find_tl(${luaStr(st.smokeId)})
+if not tl then error("bridge-smoke not found by unique id") end
+return { page = resolve:GetCurrentPage(), tc = tl:GetCurrentTimecode() }`);
+}
+
+/** Moves the smoke timeline's playhead (a request of its own, so the next read sees it). */
+async function seekSmoke(tc) {
+  const r = await lua(`${LUA_PRELUDE}local tl = find_tl(${luaStr(st.smokeId)})
+if not tl then error("bridge-smoke not found by unique id") end
+return { set = tl:SetCurrentTimecode(${luaStr(tc)}) }`);
+  expect(r.set === true, `SetCurrentTimecode(${tc}) returned ${JSON.stringify(r.set)}`);
+}
+
+function captureFilesLeft() {
+  try {
+    return readdirSync(st.stateDir).filter((n) => /^capture-.*\.bmp$/.test(n));
+  } catch {
+    return [];
+  }
 }
 
 /** run_lua that must succeed; returns the chunk's result. */
@@ -487,6 +513,75 @@ return { has0 = m[0] ~= nil, has1 = m[1] ~= nil, count = count, name1 = m[1] and
     });
 
     if (hasContent) {
+      let item;
+      // Measured 2026-09-24: the generator insert leaves the playhead at the end of the timeline, one
+      // past its last frame, where no seek goes back to; the tool must say what happened to it.
+      await check('capture_frame with the playhead at the end of the timeline reports where it left it', async () => {
+        const items = await call('get_timeline_items', { track_type: 'video', track_index: 1, offset: 0, limit: 1 });
+        expect(!items.isError, items.data.error ?? items.text);
+        item = asList(items.data.items)[0];
+        expect(item && typeof item.unique_id === 'string', `no item on video track 1: ${JSON.stringify(items.data.items)}`);
+        const before = await pageAndPlayhead();
+        const r = await call('capture_frame', { targets: [{ type: 'playhead' }, { type: 'item', item_id: item.unique_id, at: 'first' }] }, Math.max(defaultWaitS, 60) + 30);
+        expect(!r.isError, r.data.error ?? r.text);
+        const frames = asList(r.data.frames);
+        expect(frames.length === 2 && r.images.length === 2, `${frames.length} frame(s): failed ${JSON.stringify(r.data.failed)}`);
+        const after = await pageAndPlayhead();
+        expect(after.page === before.page, `page ${before.page} -> ${after.page}`);
+        const ph = r.data.playhead ?? {};
+        expect(ph.was === before.tc, `the tool restored towards ${ph.was}, the playhead was at ${before.tc}`);
+        expect(ph.restored === (after.tc === before.tc), `restored ${ph.restored}, but the playhead went ${before.tc} -> ${after.tc}`);
+        if (!ph.restored) {
+          expect(ph.now === after.tc, `now ${ph.now}, the playhead is at ${after.tc}`);
+          expect(asList(r.data.warnings).some((w) => w.includes(`it is at ${after.tc}`)), `no warning: ${JSON.stringify(r.data.warnings)}`);
+        }
+        return `playhead ${before.tc} on ${before.page}; captured ${frames[0].timecode} as ${JSON.stringify(frames[0].label)}; restored ${ph.restored}${ph.restored ? '' : ` (now ${ph.now}; warning ${JSON.stringify(r.data.warnings)})`}`;
+      });
+      await check('capture_frame: the playhead, the first frame of item 1 and the smoke-1 marker', async () => {
+        expect(item, 'no item from the previous check');
+        await seekSmoke('01:00:02:00');
+        const before = await pageAndPlayhead();
+        const t0 = Date.now();
+        const r = await call('capture_frame', {
+          targets: [{ type: 'playhead' }, { type: 'item', item_id: item.unique_id, at: 'first' }, { type: 'markers', color: 'Blue', contains: 'smoke-1' }],
+        }, Math.max(defaultWaitS, 60) + 30);
+        const ms = Date.now() - t0;
+        expect(!r.isError, r.data.error ?? r.text);
+        const frames = asList(r.data.frames);
+        expect(frames.length === 3 && r.images.length === 3, `${frames.length} frame(s), ${r.images.length} image(s); failed ${JSON.stringify(r.data.failed)}`);
+        r.images.forEach((img, i) => {
+          const jpeg = Buffer.from(img.data, 'base64');
+          expect(img.mimeType === 'image/jpeg' && jpeg[0] === 0xff && jpeg[1] === 0xd8, `image ${i + 1} is not a JPEG`);
+          expect(jpeg.length === frames[i].bytes, `image ${i + 1} is ${jpeg.length} bytes, frames[] says ${frames[i].bytes}`);
+          expect(Math.max(frames[i].width, frames[i].height) <= 960, `image ${i + 1} is ${frames[i].width}x${frames[i].height}`);
+        });
+        const [playhead, first, marker] = frames;
+        expect(playhead.label === 'playhead' && playhead.timecode === before.tc, `the playhead frame is ${playhead.timecode}, the playhead was ${before.tc}`);
+        expect(first.frame === Math.ceil(item.start), `the item's first frame is ${first.frame}, its start ${item.start}`);
+        expect(marker.offset === 1 && marker.frame === r.data.start_frame + 1, `the smoke-1 marker (added at frame 1) came back at frame ${marker.frame}, offset ${marker.offset}`);
+        expect(r.data.page?.restored === true && r.data.playhead?.restored === true, `restores: page ${JSON.stringify(r.data.page)}, playhead ${JSON.stringify(r.data.playhead)}`);
+        const after = await pageAndPlayhead();
+        expect(after.page === before.page && after.tc === before.tc, `before: ${JSON.stringify(before)}, after: ${JSON.stringify(after)}`);
+        const left = captureFilesLeft();
+        expect(left.length === 0, `capture files left in ${st.stateDir}: ${left.join(' ')}`);
+        return `${ms} ms from page ${before.page}; ${frames.map((f) => `${f.label} ${f.timecode} ${f.width}x${f.height} ${f.bytes} B`).join('; ')}`;
+      });
+      await check('capture_frame from the Fairlight page puts the page back', async () => {
+        const before = await pageAndPlayhead();
+        expect((await lua('return resolve:OpenPage("fairlight")')) === true, 'OpenPage("fairlight") returned false');
+        try {
+          const onFairlight = await pageAndPlayhead();
+          const r = await call('capture_frame', {}, Math.max(defaultWaitS, 60) + 30);
+          expect(!r.isError, r.data.error ?? r.text);
+          expect(r.images.length === 1, `${r.images.length} image(s)`);
+          expect(r.data.page?.was === 'fairlight' && r.data.page?.switched === true && r.data.page?.restored === true, `page ${JSON.stringify(r.data.page)}`);
+          const after = await pageAndPlayhead();
+          expect(after.page === 'fairlight' && after.tc === onFairlight.tc, `on Fairlight: ${JSON.stringify(onFairlight)}, after: ${JSON.stringify(after)}`);
+          return `captured ${asList(r.data.frames)[0]?.timecode} and returned to fairlight`;
+        } finally {
+          if (before.page !== 'fairlight') await lua(`return resolve:OpenPage(${luaStr(before.page)})`);
+        }
+      });
       await check('delete_markers refuses without confirm', async () => {
         const r = await call('delete_markers', { color: 'Blue', confirm: false });
         expect(r.isError === true, `not refused: ${JSON.stringify(r.data)}`);
