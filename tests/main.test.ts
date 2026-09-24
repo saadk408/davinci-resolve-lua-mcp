@@ -68,11 +68,11 @@ async function holdSlot(r: Rig): Promise<{ pending: Promise<unknown>; stop: () =
   return { pending, stop: () => fake.stop() };
 }
 
-test('main() without options serves the 15 tools, never holds the lock while idle and exits 0 on SIGTERM', async () => {
+test('main() without options serves the 16 tools, never holds the lock while idle and exits 0 on SIGTERM', async () => {
   const r = await rig();
   try {
     const { tools } = await r.client.listTools();
-    assert.equal(tools.length, 15);
+    assert.equal(tools.length, 16);
     assert.equal(await exists(r.lockPath), false, 'no lock while idle');
     const status = await r.client.callTool({ name: 'resolve_status', arguments: {} });
     assert.notEqual(status.isError, true);
@@ -118,7 +118,7 @@ test('wrapServer sees the McpServer exactly once, and beforeExit is awaited befo
   try {
     const { tools } = await r.client.listTools();
     assert.equal(wrapCalls, 1);
-    assert.equal(tools.length, 16);
+    assert.equal(tools.length, 17);
     const probe = await r.client.callTool({ name: 'hook_probe', arguments: {} });
     assert.equal((probe.content as Array<{ text?: string }>)[0]?.text, 'probe');
     const exit = r.proc.exit.bind(r.proc);

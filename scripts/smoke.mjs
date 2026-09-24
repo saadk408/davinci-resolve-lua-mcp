@@ -49,7 +49,7 @@ const TOOL_NAMES = [
   'resolve_status', 'run_lua', 'get_project_info', 'list_projects', 'list_timelines',
   'list_media_pool_clips', 'get_timeline_items', 'add_marker', 'delete_markers',
   'set_current_timeline', 'open_project', 'render_current_timeline', 'get_render_status',
-  'stop_bridge', 'scripting_api_docs',
+  'stop_bridge', 'scripting_api_docs', 'capture_frame',
 ];
 const SMOKE_TIMELINE = 'bridge-smoke';
 const WATCHDOG_MS = 10 * 60 * 1000;
@@ -239,7 +239,7 @@ function manualCleanup() {
 }
 
 async function smoke() {
-  await check('tools/list has the 15 tools', async () => {
+  await check('tools/list has the 16 tools', async () => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
     expect(JSON.stringify(names) === JSON.stringify([...TOOL_NAMES].sort()), `got ${names.length}: ${names.join(' ')}`);

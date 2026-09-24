@@ -2,49 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { decode } from 'jpeg-js';
 import { downscaleToRgba, encodeJpeg, fitJpeg, fitSize, ImageError, parseBmp, type Rgba } from '../src/image.js';
-
-type Rgb = [number, number, number];
-
-/**
- * A BMP of `rows` (top row first) with a 14-byte file header and a `dibSize` info header, the
- * layout Resolve writes by default. Padding bytes are 0xEE and the fourth byte of a 32-bit pixel
- * is 0xAA, so a parser that reads either shows it in the pixels.
- */
-function writeBmp(rows: Rgb[][], opts: { bits?: 24 | 32; topDown?: boolean; dibSize?: number } = {}): Buffer {
-  const bits = opts.bits ?? 24;
-  const dibSize = opts.dibSize ?? 40;
-  const height = rows.length;
-  const width = rows[0]!.length;
-  const stride = Math.ceil((width * bits) / 32) * 4;
-  const offset = 14 + dibSize;
-  const buf = Buffer.alloc(offset + stride * height);
-  buf.fill(0xee, offset);
-  buf.write('BM', 0, 'latin1');
-  buf.writeUInt32LE(buf.length, 2);
-  buf.writeUInt32LE(offset, 10);
-  buf.writeUInt32LE(dibSize, 14);
-  buf.writeInt32LE(width, 18);
-  buf.writeInt32LE(opts.topDown ? -height : height, 22);
-  buf.writeUInt16LE(1, 26);
-  buf.writeUInt16LE(bits, 28);
-  buf.writeUInt32LE(0, 30);
-  buf.writeUInt32LE(stride * height, 34);
-  rows.forEach((row, r) => {
-    const stored = opts.topDown ? r : height - 1 - r;
-    row.forEach(([red, green, blue], x) => {
-      const p = offset + stored * stride + x * (bits / 8);
-      buf[p] = blue;
-      buf[p + 1] = green;
-      buf[p + 2] = red;
-      if (bits === 32) buf[p + 3] = 0xaa;
-    });
-  });
-  return buf;
-}
-
-function solid(width: number, height: number, rgb: Rgb): Rgb[][] {
-  return Array.from({ length: height }, () => Array.from({ length: width }, () => rgb));
-}
+import { solid, writeBmp, type Rgb } from './helpers/bmp.js';
 
 /** The picture as rows of [r, g, b], checking that every alpha is 255. */
 function rowsOf(img: Rgba): Rgb[][] {
