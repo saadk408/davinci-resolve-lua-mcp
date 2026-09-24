@@ -420,7 +420,10 @@ measured on.
   too on win32), because Claude Desktop passes a `user_config.default` such as
   `${HOME}/.davinci-resolve-lua-mcp` to the server literally; `home` is `config.home` (`os.homedir()`,
   which is `%USERPROFILE%` on Windows where `HOME` is unset) and `loadConfig(env, home, platform)` is
-  the seam the tests use to assert Windows paths on a Mac.
+  the seam the tests use to assert Windows paths on a Mac. A setting with no manifest `default` that
+  the user never saved arrives as its unfilled placeholder (`${user_config.scripts_dir}`,
+  `${user_config.prefs_dir}`; Claude Desktop 2.7032.0, measured 2026-09-24); `pick()` treats a
+  whole placeholder like `""`, as unset, so the platform default applies without a config problem.
 - Scripts that spawn the server use `StdioClientTransport` (`@modelcontextprotocol/client/stdio`),
   which gives the child `getDefaultEnvironment()` (`HOME LOGNAME PATH SHELL TERM USER`) plus the
   `env` option only, so every `RLB_*` variable is passed explicitly. `Client.callTool` returns
