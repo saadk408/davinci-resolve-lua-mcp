@@ -35,7 +35,7 @@ Not negotiable without the user's say-so.
 - No network listeners of any kind. Files in, prefs out.
 - Never modify anything under `/Applications` or `/Library` (Windows: `C:\Program Files`,
   `%PROGRAMDATA%`) without asking; Blackmagic's docs folder is read-only. The server writes only its
-  state dir and the user Utility folder (its two Lua files) and never creates Resolve's folders.
+  state dir and the user Utility folder (its two Lua files); it never creates Utility itself, but creates its Tools submenu.
 - Destructive tools take `confirm: bool = false` and refuse when false. Development never runs
   destructive Resolve operations except on objects the tests created; smoke runs and mutating Lua go
   only to a scratch project the user names, never to a real edit.
@@ -89,7 +89,7 @@ Claude Desktop --stdio--> MCPB "DaVinci Resolve Lua MCP" = node ${__dirname}/ser
       | polls  <prefs_dir>/*/Fusion.prefs for RLBResp = "<id>:<hex json>"
       |        (macOS ~/Library/.../Fusion/Profiles; Windows %APPDATA%\...\Support\Fusion\Profiles, unmeasured)
       | deletes next.lua after the response (Lua cannot delete files)
-      | first run: copies bridge/resolve_mcp_bridge.lua + scripts/claude_diag.lua into the user Utility folder
+      | first run: copies bridge/resolve_mcp_bridge.lua to Utility root + scripts/claude_diag.lua to Utility/Tools/Diagnose - Resolve.lua
       v
 bridge/resolve_mcp_bridge.lua (Scripts-menu Lua state, holds live `resolve`)
       loop: bmd.wait(0.05); bmd.fileexists -> loadfile -> new id & our session? ->

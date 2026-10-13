@@ -577,12 +577,12 @@ local function step_request()
     local p = su
     if not p:match("[/\\]$") then p = p .. "/" end   -- a Windows MapPath may end in a backslash
     rec(Q, "control_loadfile_self", function()
-      local f, e = loadfile(p .. "claude_diag.lua")
-      return { path = p .. "claude_diag.lua", fn = type(f), err = e and tos(e) or "<nil>" }
+      local f, e = loadfile(p .. "Tools/Diagnose - Resolve.lua")
+      return { path = p .. "Tools/Diagnose - Resolve.lua", fn = type(f), err = e and tos(e) or "<nil>" }
     end)
     -- Windows: the server stamps the state dir with forward slashes; this proves loadfile accepts them.
     rec(Q, "control_loadfile_self_slashes", function()
-      local sp = (p .. "claude_diag.lua"):gsub("\\", "/")
+      local sp = (p .. "Tools/Diagnose - Resolve.lua"):gsub("\\", "/")
       local f, e = loadfile(sp)
       return { path = sp, fn = type(f), err = e and tos(e) or "<nil>" }
     end)

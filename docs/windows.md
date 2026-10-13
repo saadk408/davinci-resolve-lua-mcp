@@ -38,7 +38,7 @@ assumes, what a Windows contributor should confirm, the commands to do it with, 
    Get-ChildItem "$env:APPDATA\Blackmagic Design\DaVinci Resolve\Support\Fusion\Scripts\Utility"
    ```
 
-   Expected: `resolve_mcp_bridge.lua` and `claude_diag.lua`. If the folder does not exist, find the
+   Expected: `resolve_mcp_bridge.lua` at Utility root and `Tools/Diagnose - Resolve.lua` (inspect the Tools folder as well). If the folder does not exist, find the
    one Resolve made and record it (finding W2):
 
    ```powershell
@@ -99,7 +99,7 @@ assumes, what a Windows contributor should confirm, the commands to do it with, 
 
 ## Step 3: run claude_diag and decode RLBDiag
 
-1. With the scratch project open, click `Workspace > Scripts > claude_diag`. It runs for about
+1. With the scratch project open, click `Workspace > Scripts > Tools > Diagnose - Resolve`. It runs for about
    35 seconds (a 30-second loop), creates a `claude_diag` bin with one sub-bin per finding, and
    creates and deletes one timeline. Wait for the `RLB_DIAG_DONE` bin to appear.
 2. Decode the result to a file on your Desktop:

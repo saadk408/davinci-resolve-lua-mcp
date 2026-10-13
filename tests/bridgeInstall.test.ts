@@ -127,3 +127,59 @@ test('missing folder, permission denied, auto-install off and an unstampable sta
     await dirs.cleanup();
   }
 });
+
+test('diagnostic menu mapping installs in Tools and reruns preserve legacy and unrelated entries', async () => {
+  const dirs = await makeTempDirs();
+  try {
+    assert.deepEqual(BRIDGE_FILES.map((f) => f.name), ['resolve_mcp_bridge.lua', 'Tools/Diagnose - Resolve.lua']);
+    const base = { scriptsDir: dirs.scriptsDir, stateDir: stampDir(dirs.stateDir), autoInstall: true, bundleDir: repoRoot() };
+    const legacy = path.join(dirs.scriptsDir, 'claude_diag.lua');
+    const unrelated = path.join(dirs.scriptsDir, 'Tools', 'Unrelated.lua');
+    await fsp.writeFile(legacy, 'legacy copy retained for the verified migration');
+    await fsp.mkdir(path.dirname(unrelated));
+    await fsp.writeFile(unrelated, 'unrelated command');
+
+    const installed = await installBridgeFiles(base);
+    assert.equal(installed.outcome, 'installed', installed.message);
+    const diagnostic = path.join(dirs.scriptsDir, 'Tools', 'Diagnose - Resolve.lua');
+    assert.equal(installed.files[1]?.path, diagnostic);
+    const expected = stampLua(await fsp.readFile(path.join(repoRoot(), 'scripts/claude_diag.lua'), 'utf8'), base.stateDir);
+    assert.equal(await fsp.readFile(diagnostic, 'utf8'), expected);
+    assert.ok(expected.includes('loadfile(p .. "Tools/Diagnose - Resolve.lua")'));
+    assert.equal(await exists(`${diagnostic}.tmp`), false);
+
+    assert.equal((await installBridgeFiles(base)).outcome, 'up_to_date');
+    assert.deepEqual((await fsp.readdir(path.join(dirs.scriptsDir, 'Tools'))).sort(), ['Diagnose - Resolve.lua', 'Unrelated.lua']);
+    assert.equal(await fsp.readFile(legacy, 'utf8'), 'legacy copy retained for the verified migration');
+    assert.equal(await fsp.readFile(unrelated, 'utf8'), 'unrelated command');
+  } finally {
+    await dirs.cleanup();
+  }
+});
+
+test('fresh diagnostic install creates only Tools and never a flat diagnostic entry', async () => {
+  const dirs = await makeTempDirs();
+  try {
+    const r = await installBridgeFiles({ scriptsDir: dirs.scriptsDir, stateDir: stampDir(dirs.stateDir), autoInstall: true, bundleDir: repoRoot() });
+    assert.equal(r.outcome, 'installed', r.message);
+    assert.deepEqual((await fsp.readdir(dirs.scriptsDir)).sort(), ['Tools', 'resolve_mcp_bridge.lua']);
+    assert.deepEqual(await fsp.readdir(path.join(dirs.scriptsDir, 'Tools')), ['Diagnose - Resolve.lua']);
+  } finally {
+    await dirs.cleanup();
+  }
+});
+
+test('a submenu path conflict is reported without replacing the conflicting file', async () => {
+  const dirs = await makeTempDirs();
+  try {
+    const conflict = path.join(dirs.scriptsDir, 'Tools');
+    await fsp.writeFile(conflict, 'unrelated file');
+    const r = await installBridgeFiles({ scriptsDir: dirs.scriptsDir, stateDir: stampDir(dirs.stateDir), autoInstall: true, bundleDir: repoRoot() });
+    assert.equal(r.outcome, 'error', r.message);
+    assert.match(r.message, /cannot (read|write).*Diagnose - Resolve/);
+    assert.equal(await fsp.readFile(conflict, 'utf8'), 'unrelated file');
+    assert.equal(await exists(path.join(dirs.scriptsDir, 'claude_diag.lua')), false);
+  } finally {
+    await dirs.cleanup();
+  }
+});

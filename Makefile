@@ -96,7 +96,7 @@ dev-unregister:
 ## Remove the two Lua files the server installed, and nothing else, from the user Utility folder
 ## (or from RLB_SCRIPTS_DIR when set).
 uninstall-bridge:
-	@for f in resolve_mcp_bridge.lua claude_diag.lua; do \
+	@for f in resolve_mcp_bridge.lua "Tools/Diagnose - Resolve.lua"; do \
 	  p="$(SCRIPTS_DIR)/$$f"; \
 	  if [ -f "$$p" ]; then rm -f "$$p" && echo "removed $$p"; else echo "not present: $$p"; fi; \
 	done

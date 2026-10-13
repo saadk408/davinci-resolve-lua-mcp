@@ -1,5 +1,5 @@
 // First-run self-install of the two Lua files into Resolve's user Utility scripts folder, the only
-// Resolve path this project writes. The folder is never created; a missing one is reported.
+// Resolve path this project writes. Utility itself is never created; only its Tools submenu is.
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import type { Logger } from './log.js';
@@ -12,13 +12,13 @@ export const STAMP_TOKEN = '@@RLB_STATE_DIR@@';
 export interface BridgeFile {
   /** Path inside the bundle (and the repository). */
   source: string;
-  /** File name inside the Utility folder; the Scripts menu shows it without the extension. */
+  /** Relative menu path inside Utility; folders become submenus and the extension is hidden. */
   name: string;
 }
 
 export const BRIDGE_FILES: readonly BridgeFile[] = [
   { source: 'bridge/resolve_mcp_bridge.lua', name: 'resolve_mcp_bridge.lua' },
-  { source: 'scripts/claude_diag.lua', name: 'claude_diag.lua' },
+  { source: 'scripts/claude_diag.lua', name: 'Tools/Diagnose - Resolve.lua' },
 ];
 
 export type InstallOutcome =
@@ -101,7 +101,7 @@ export async function installBridgeFiles(opts: InstallOptions): Promise<InstallR
     checked_at: new Date().toISOString(),
   };
   if (!opts.autoInstall) {
-    return { ...base, outcome: 'skipped_auto_install_off', message: 'auto-install is off (RLB_AUTO_INSTALL); copy the two Lua files by hand' };
+    return { ...base, outcome: 'skipped_auto_install_off', message: 'auto-install is off (RLB_AUTO_INSTALL); copy the bridge at Utility root and the diagnostic to Utility/Tools/Diagnose - Resolve.lua by hand' };
   }
   const stampProblem = stateDirStampProblem(opts.stateDir);
   if (stampProblem) {
@@ -159,6 +159,9 @@ export async function installBridgeFiles(opts: InstallOptions): Promise<InstallR
         else entry.reason = 'content differed from the bundled file';
       }
       try {
+        // Utility was checked above. Create only the category containing this bundled command.
+        const parent = path.dirname(target);
+        if (parent !== opts.scriptsDir) await fsp.mkdir(parent, { recursive: true });
         await writeAtomic(target, stamped);
         log.info(`bridge script ${entry.action}`, { path: target, version, reason: entry.reason });
       } catch (err) {

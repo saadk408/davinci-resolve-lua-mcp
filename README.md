@@ -57,12 +57,14 @@ To update, download the new file and open it; extensions installed from a file d
 
 Open a project in Resolve and click `Workspace > Scripts > resolve_mcp_bridge`. Nothing appears in the Console (the free edition mutes `print` in menu scripts); the bridge loops in the background and Resolve stays responsive. In Claude Desktop, `resolve_status` then reports `alive: true` with the product, version, edition, page and open project.
 
-<img src="docs/images/scripts-menu.png" width="600" alt="Resolve's Workspace > Scripts menu listing claude_diag and resolve_mcp_bridge">
+<img src="docs/images/scripts-menu.png" width="600" alt="Earlier Resolve Scripts menu; the diagnostic is now Tools > Diagnose - Resolve">
 
 > [!IMPORTANT]
 > The bridge lives and dies with Resolve. After every Resolve launch, click `Workspace > Scripts > resolve_mcp_bridge` again before using the tools. It is never started automatically, by design: a loop started through `fusion:Execute` holds Fusion's shared script executor for the whole session, so the Scripts menu is the only supported launch.
 
 To stop it, ask Claude to stop the bridge (`stop_bridge`), or quit Resolve. Clicking the script a second time while the bridge is running is harmless: the new one takes over and the old one exits on the first request addressed to the newer session.
+
+The sandbox diagnostic appears under `Workspace > Scripts > Tools > Diagnose - Resolve`. Run it only with a scratch project open. Menu organization migration archives the recognized old `claude_diag.lua` copy; auto-install never recreates that flat entry.
 
 ## Example prompts
 
@@ -139,8 +141,8 @@ Claude Desktop shows these five settings when you install the extension. Keep th
 
 | Setting | Default | What it does |
 |---|---|---|
-| Resolve user scripts folder | platform default | Where the two Lua scripts are copied so they appear under `Workspace > Scripts`. The only Resolve folder ever written, and never created: launch Resolve once so it exists. |
-| Install the bridge scripts automatically | on | Copy (and update) `resolve_mcp_bridge.lua` and `claude_diag.lua` into the scripts folder when the server starts. Off means you copy them by hand. |
+| Resolve user scripts folder | platform default | Where the two Lua scripts are copied so they appear under `Workspace > Scripts`. The Utility root is never created: launch Resolve once so it exists. The installer creates its Tools category. |
+| Install the bridge scripts automatically | on | Copy (and update) `resolve_mcp_bridge.lua` at the scripts-folder root and `Tools/Diagnose - Resolve.lua` in its Tools submenu when the server starts. Off means you copy them by hand. |
 | State directory | platform default | Where the request file, the lock and the server log live. On Windows prefer an ASCII-only path. |
 | Default tool timeout (seconds) | 30 | How long a tool waits for the bridge before giving up, 1 to 300. `run_lua` can override it per call. |
 | Resolve Fusion prefs folder | platform default | The folder holding `<profile>/Fusion.prefs`, which the bridge answers through; the newest profile file is read. Set it only if `resolve_status` says `prefs_missing`. |
@@ -179,7 +181,7 @@ The settings map onto `RLB_SCRIPTS_DIR`, `RLB_AUTO_INSTALL`, `RLB_STATE_DIR`, `R
 
 - **The bridge is missing from `Workspace > Scripts`.** Ask Claude for `resolve_status` and read `bridge_script.outcome`:
   - `installed`, `updated` or `up_to_date`: the file is in the scripts folder. Reopen the menu; Resolve lists a new file without a restart.
-  - `skipped_auto_install_off`: the setting is off. Copy `bridge/resolve_mcp_bridge.lua` and `scripts/claude_diag.lua` there yourself.
+  - `skipped_auto_install_off`: the setting is off. Copy `bridge/resolve_mcp_bridge.lua` to Utility root and `scripts/claude_diag.lua` to `Utility/Tools/Diagnose - Resolve.lua` yourself.
   - `scripts_dir_missing`: the folder does not exist. Launch Resolve once so it creates it, or fix the scripts-folder setting; the server never creates Resolve folders.
   - `permission_denied` or `error`: the operating-system message says why.
 - **`config_problems` names the state directory.** The path cannot be embedded in the bridge: it contains `]==]`, a double quote or a newline, starts with `@@`, or contains a backslash on macOS (Windows rewrites backslashes as forward slashes). Auto-install stays off until you change the State directory setting.
@@ -240,7 +242,7 @@ The extension runs entirely on your machine and sends nothing anywhere. The full
 ## Uninstall
 
 1. Remove "DaVinci Resolve Lua MCP" under Settings > Extensions in Claude Desktop.
-2. Delete `resolve_mcp_bridge.lua` and `claude_diag.lua` from the scripts folder (see [Paths](#paths)); from a checkout on a Mac, `make uninstall-bridge` removes exactly those two files.
+2. Delete `resolve_mcp_bridge.lua` and `Tools/Diagnose - Resolve.lua` from the scripts folder (see [Paths](#paths)); from a checkout on a Mac, `make uninstall-bridge` removes exactly those two files.
 3. Delete the state directory.
 
 The `Global.ResolveLuaBridge.*` keys stay in `Fusion.prefs` (under 2 KB after a clean stop: the session record, the stop answer and eight blanked keys). Remove them from Fusion's preferences if you want the file pristine.
@@ -273,7 +275,7 @@ make install   # make bundle, then open the .mcpb so Claude Desktop shows its di
 | `make dev-register` / `make dev-unregister` | Add or remove a `davinci-resolve-lua-mcp-dev` entry in `~/Library/Application Support/Claude/claude_desktop_config.json` that runs `server/index.js` from this checkout with the current Node. The file is backed up first, other keys are kept, mode 0600 is preserved. `scripts/dev-register.mjs` takes `--config`, `--name`, `--server` (another checkout's `server/index.js`, for example a git worktree's), `--env` (a `KEY=VALUE` file whose `RLB_*` lines become the entry's environment; default `.env`), `--dry-run` and `--remove`. |
 | `make smoke SMOKE_PROJECT="<name>"` | Build, then drive the real tools against the live bridge exactly as Claude Desktop does: status, latency, prints and errors, project and timeline listings, a scratch timeline with markers, pagination, truncation, a render and its cleanup. `SMOKE_FLAGS=--no-render` skips the render. Output goes to `.out/smoke.log`. |
 | `make stop` | Ask the running bridge to exit (`stop_bridge`); relaunch it from the Scripts menu afterwards. |
-| `make uninstall-bridge` | Remove exactly `resolve_mcp_bridge.lua` and `claude_diag.lua` from the scripts folder (`RLB_SCRIPTS_DIR` overrides the default). |
+| `make uninstall-bridge` | Remove exactly `resolve_mcp_bridge.lua` and `Tools/Diagnose - Resolve.lua` from the scripts folder (`RLB_SCRIPTS_DIR` overrides the default). |
 | `make lint-lua` | Check that the generated API types match the installed `.pyi`, then run `lua-language-server --check` over the workspace, failing on any diagnostic under `bridge/` or `tests/`. |
 | `make inspect` | Build, then `tools/list` through the MCP Inspector CLI. The Inspector runs the server with the production paths, so this performs the real self-install. |
 | `make gen-types`, `make clean` | Regenerate `types/resolve_host.d.lua` from the shipped `.pyi`; remove `server/`, `dist/` and `.out/`. |
